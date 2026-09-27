@@ -2,6 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id(
 
 android { namespace = "com.tradedeck.shield"; compileSdk = 35
     buildFeatures { buildConfig = true; compose = true }
+    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     val shieldCloudProjectNumber = (project.findProperty("SHIELD_CLOUD_PROJECT_NUMBER") as String?) ?: "0"
     defaultConfig {
         applicationId = "com.tradedeck.shield"; minSdk = 26; targetSdk = 35; versionCode = 1; versionName = "1.0.0"
