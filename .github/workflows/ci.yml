@@ -19,8 +19,21 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with: {gradle-version: '8.10.2'}
       - run: cd android && gradle assembleDebug
+      - uses: actions/upload-artifact@v7
+        with:
+          name: shield-android-debug-unsigned
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
   ios:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: xcodebuild -project ios/ShieldCamera/ShieldCamera.xcodeproj -scheme ShieldCamera -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - run: xcodebuild -project ios/ShieldCamera/ShieldCamera.xcodeproj -scheme ShieldCamera -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath ios-build CODE_SIGNING_ALLOWED=NO build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: shield-ios-simulator-unsigned
+          path: ios-build/Build/Products/Debug-iphonesimulator/ShieldCamera.app
+          if-no-files-found: error
+          retention-days: 14
