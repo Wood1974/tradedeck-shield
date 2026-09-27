@@ -22,7 +22,7 @@ services:
       - key: SHIELD_RATE_LIMIT_PER_MINUTE
         value: '30'
       - key: SHIELD_LOCAL_JWT_SECRET
-        sync: false
+        generateValue: true
       - key: SHIELD_APP_ID
         sync: false
       - key: SHIELD_PLAY_PACKAGE_NAME
