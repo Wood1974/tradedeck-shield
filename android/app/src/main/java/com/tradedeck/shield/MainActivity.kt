@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
 private fun ShieldCameraScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var baseUrl by remember { mutableStateOf("https://") }
+    var baseUrl by remember { mutableStateOf("https://tradedeck-shield.onrender.com") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var session by remember { mutableStateOf<ShieldSession?>(null) }
