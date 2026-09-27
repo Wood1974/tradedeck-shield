@@ -1,0 +1,2 @@
+# Security hardening
+Production modes fail closed for authentication, job authorization, and configured platform integrity. Original objects are write-once by protocol. Keep service credentials server-only. Terminate TLS at the platform edge, restrict admin IDs, rotate internal secrets, back up custody data, disable API docs by default, and monitor 401/403/409/413/422/429 rates. Never log photo bytes, bearer tokens, App Attest assertions, Play Integrity tokens, or raw service-account credentials.

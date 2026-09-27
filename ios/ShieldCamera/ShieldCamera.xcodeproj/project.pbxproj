@@ -1,0 +1,39 @@
+// !$*UTF8*$!
+{
+ archiveVersion = 1;
+ classes = {};
+ objectVersion = 56;
+ objects = {
+  111111111111111111111111 /* ShieldCameraApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShieldCameraApp.swift; sourceTree = "<group>";};
+  222222222222222222222222 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>";};
+  333333333333333333333333 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>";};
+  444444444444444444444444 /* Crypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Crypto.swift; sourceTree = "<group>";};
+  555555555555555555555555 /* AppAttest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAttest.swift; sourceTree = "<group>";};
+  666666666666666666666666 /* LocationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationProvider.swift; sourceTree = "<group>";};
+  777777777777777777777777 /* API.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = API.swift; sourceTree = "<group>";};
+  888888888888888888888888 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>";};
+  999999999999999999999999 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = ../Info.plist; sourceTree = "<group>";};
+  AAAAAAAAAAAAAAAAAAAAAAAA = {isa = PBXGroup; children = (111111111111111111111111,222222222222222222222222,333333333333333333333333,444444444444444444444444,555555555555555555555555,666666666666666666666666,777777777777777777777777,888888888888888888888888,999999999999999999999999,); path = ShieldCamera; sourceTree = "<group>";};
+  BBBBBBBBBBBBBBBBBBBBBBBB = {isa = PBXGroup; children = (AAAAAAAAAAAAAAAAAAAAAAAA,); sourceTree = "<group>";};
+  CCCCCCCCCCCCCCCCCCCCCCCC = {isa = PBXBuildFile; fileRef = 111111111111111111111111;};
+  DDDDDDDDDDDDDDDDDDDDDDDD = {isa = PBXBuildFile; fileRef = 222222222222222222222222;};
+  EEEEEEEEEEEEEEEEEEEEEEEE = {isa = PBXBuildFile; fileRef = 333333333333333333333333;};
+  FFFFFFFFFFFFFFFFFFFFFFFF = {isa = PBXBuildFile; fileRef = 444444444444444444444444;};
+  121212121212121212121212 = {isa = PBXBuildFile; fileRef = 555555555555555555555555;};
+  131313131313131313131313 = {isa = PBXBuildFile; fileRef = 666666666666666666666666;};
+  141414141414141414141414 = {isa = PBXBuildFile; fileRef = 777777777777777777777777;};
+  151515151515151515151515 = {isa = PBXBuildFile; fileRef = 888888888888888888888888;};
+  161616161616161616161616 = {isa = PBXNativeTarget; buildConfigurationList = 171717171717171717171717; buildPhases = (181818181818181818181818,191919191919191919191919,); buildRules = (); dependencies = (); name = ShieldCamera; productName = ShieldCamera; productReference = 202020202020202020202020; productType = "com.apple.product-type.application";};
+  202020202020202020202020 = {isa = PBXFileReference; explicitFileType = wrapper.application; path = ShieldCamera.app; sourceTree = BUILT_PRODUCTS_DIR;};
+  181818181818181818181818 = {isa = PBXSourcesBuildPhase; files = (CCCCCCCCCCCCCCCCCCCCCCCC,DDDDDDDDDDDDDDDDDDDDDDDD,EEEEEEEEEEEEEEEEEEEEEEEE,FFFFFFFFFFFFFFFFFFFFFFFF,121212121212121212121212,131313131313131313131313,141414141414141414141414,151515151515151515151515,);};
+  191919191919191919191919 = {isa = PBXResourcesBuildPhase; files = ();};
+  212121212121212121212121 = {isa = PBXProject; buildConfigurationList = 222222222222222222222222; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; mainGroup = BBBBBBBBBBBBBBBBBBBBBBBB; productRefGroup = BBBBBBBBBBBBBBBBBBBBBBBB; projectDirPath = ""; projectRoot = ""; targets = (161616161616161616161616,);};
+  171717171717171717171717 = {isa = XCConfigurationList; buildConfigurations = (232323232323232323232323,242424242424242424242424); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+  222222222222222222222222 = {isa = XCConfigurationList; buildConfigurations = (252525252525252525252525,262626262626262626262626); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+  232323232323232323232323 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = com.tradedeck.shield; INFOPLIST_FILE = ShieldCamera/Info.plist; CODE_SIGN_ENTITLEMENTS = ShieldCamera/ShieldCamera.entitlements; SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 17.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = "";};};
+  242424242424242424242424 = {isa = XCBuildConfiguration; name = Release; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = com.tradedeck.shield; INFOPLIST_FILE = ShieldCamera/Info.plist; CODE_SIGN_ENTITLEMENTS = ShieldCamera/ShieldCameraProduction.entitlements; SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 17.0; TARGETED_DEVICE_FAMILY = "1,2"; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = "";};};
+  252525252525252525252525 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {SDKROOT = iphoneos;};};
+  262626262626262626262626 = {isa = XCBuildConfiguration; name = Release; buildSettings = {SDKROOT = iphoneos;};};
+ };
+ rootObject = 212121212121212121212121;
+}

@@ -1,0 +1,13 @@
+# Release checklist
+- Standalone local accounts and exact job/point grants provisioned; denial tested
+- Writable Git remote connected and server, Android, and iOS CI builds green
+- Paid Render service with persistent disk configured; production secrets set
+- Apple App Attest physical-device production test passed
+- Play Integrity Play-distributed production test passed
+- Consistent server backups copied off disk and restore drill passed
+- RFC3161 gateway configured if timestamping is required
+- iOS distribution signing/profile configured
+- Android release keystore and Play App Signing configured
+- Privacy policy, camera/location disclosures, support URL supplied in stores
+- CI full suite green with all pinned dependencies
+- Restore drill and incident contacts documented

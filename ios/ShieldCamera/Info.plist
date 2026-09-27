@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleDisplayName</key><string>TradeDeck Shield</string><key>CFBundleShortVersionString</key><string>1.0</string><key>CFBundleVersion</key><string>1</string><key>NSCameraUsageDescription</key><string>Shield uses the system camera to create evidence. Photos cannot be selected from the gallery.</string><key>NSLocationWhenInUseUsageDescription</key><string>Shield records location signals surrounding the capture. It does not claim GPS verification.</string></dict></plist>

@@ -1,0 +1,2 @@
+# Offline & recovery
+Shield never seals evidence offline. A device may retain original capture bytes and the user's two attestation statements in OS-protected app storage. On reconnection it must obtain a fresh server challenge, recompute all hashes from the retained original, obtain fresh platform integrity evidence, upload, and wait for the server-issued Evidence ID. A locally queued capture is not evidence until the server seals it.

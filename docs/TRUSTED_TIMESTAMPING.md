@@ -1,0 +1,2 @@
+# Trusted timestamping
+Section 16 is implemented as an optional RFC3161 gateway integration. Shield hashes the bind-hash text again for the timestamp request and stores the returned DER token in the attestation metadata. When `SHIELD_TIMESTAMP_REQUIRED=true`, capture fails closed if the gateway cannot issue a token. A gateway must return the raw RFC3161 DER token for the supplied digest; production deployment must independently validate the TSA certificate/policy used by that gateway.
