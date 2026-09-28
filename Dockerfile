@@ -1,9 +1,9 @@
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
-COPY requirements.txt .
+COPY server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app ./app
+COPY server/app ./app
 RUN useradd -r shield && mkdir -p /data/storage && chown -R shield:shield /data
 USER shield
 ENV SHIELD_DATABASE_URL=sqlite:////data/shield.db SHIELD_STORAGE_ROOT=/data/storage \
