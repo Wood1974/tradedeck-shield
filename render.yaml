@@ -3,8 +3,7 @@ services:
     name: tradedeck-shield
     runtime: docker
     plan: starter
-    dockerfilePath: ./server/Dockerfile
-    dockerContext: .
+    dockerfilePath: Dockerfile
     healthCheckPath: /shield/v1/health
     disk:
       name: shield-data
