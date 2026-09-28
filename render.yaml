@@ -4,7 +4,7 @@ services:
     runtime: docker
     plan: starter
     dockerfilePath: Dockerfile
-    healthCheckPath: /shield/v1/health
+    healthCheckPath: /health
     disk:
       name: shield-data
       mountPath: /data
