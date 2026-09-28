@@ -23,11 +23,11 @@ jobs:
           CERT: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
           CERT_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
           PROFILE: ${{ secrets.IOS_APPSTORE_PROVISIONING_PROFILE_BASE64 }}
-          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          ASC_ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          ASC_KEY_ID: 2FQX7UHKNU
+          ASC_ISSUER: b00416ce-6169-4876-a31c-f3f4a30cc74c
           ASC_KEY: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
         run: |
-          for v in CERT CERT_PASSWORD PROFILE ASC_KEY_ID ASC_ISSUER ASC_KEY; do
+          for v in CERT CERT_PASSWORD PROFILE ASC_KEY; do
             test -n "${!v}" || { echo "::error::Missing required Apple signing/TestFlight secret: $v"; exit 1; }
           done
 
@@ -88,6 +88,6 @@ jobs:
         uses: apple-actions/upload-testflight-build@v3
         with:
           app-path: ${{ runner.temp }}/export/ShieldCamera.ipa
-          issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          api-key-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          issuer-id: b00416ce-6169-4876-a31c-f3f4a30cc74c
+          api-key-id: 2FQX7UHKNU
           api-private-key: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
