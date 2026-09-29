@@ -22,6 +22,7 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
     private var captureButton: UIButton!
     private var flashButton: UIButton!
     private var busy = false
+    private var discarded = false
 
     var onPhoto: ((Data) -> Void)?
     var onCancel: (() -> Void)?
@@ -31,6 +32,12 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
         view.backgroundColor = .black
         configureControls()
         configureCamera()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        discarded = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in self?.session.stopRunning() }
     }
 
     override func viewDidLayoutSubviews() {
@@ -106,7 +113,7 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
     }
 
     @objc private func capture() {
-        guard !busy, session.isRunning else { return }
+        guard !busy, !discarded, session.isRunning else { return }
         busy = true
         captureButton.isEnabled = false
         let settings = AVCapturePhotoSettings()
@@ -122,7 +129,8 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
     }
 
     @objc private func cancelCapture() {
-        session.stopRunning()
+        discarded = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in self?.session.stopRunning() }
         onCancel?()
     }
 
@@ -131,7 +139,7 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
             guard let self else { return }
             self.busy = false
             self.captureButton.isEnabled = true
-            guard error == nil, let data = photo.fileDataRepresentation(), !data.isEmpty else { return }
+            guard !self.discarded, error == nil, let data = photo.fileDataRepresentation(), !data.isEmpty else { return }
             self.onPhoto?(data)
         }
     }
