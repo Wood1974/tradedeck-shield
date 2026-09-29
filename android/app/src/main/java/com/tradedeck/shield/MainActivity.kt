@@ -167,7 +167,7 @@ private fun ShieldCameraScreen() {
                 OutlinedTextField(purpose, { purpose = it }, label = { Text("What does it document?") }, modifier = Modifier.fillMaxWidth())
                 Text("These statements are yours; Shield does not infer them from location data.")
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    OutlinedButton(onClick = { capturedFile?.delete(); capturedFile = null; photoCapturedAt = null; captureLocation = null; challenge = null }) { Text("Retake") }
+                    OutlinedButton(onClick = { capturedFile?.delete(); capturedFile = null; photoCapturedAt = null; captureLocation = null; challenge = null }, enabled = !busy) { Text("Retake") }
                     Button(onClick = {
                         val original = capturedFile?.readBytes() ?: return@Button
                         val active = session ?: return@Button
@@ -187,7 +187,7 @@ private fun ShieldCameraScreen() {
                     }, enabled = !busy && locationStated.isNotBlank() && purpose.isNotBlank()) { Text("Seal") }
                 }
             }
-            OutlinedButton(onClick = { session = null; capturedFile?.delete(); capturedFile = null; photoCapturedAt = null; captureLocation = null; challenge = null }) { Text("Sign out") }
+            OutlinedButton(onClick = { session = null; capturedFile?.delete(); capturedFile = null; photoCapturedAt = null; captureLocation = null; challenge = null }, enabled = !busy) { Text("Sign out") }
         }
         Text(message)
     }
