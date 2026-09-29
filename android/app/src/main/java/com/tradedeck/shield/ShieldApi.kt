@@ -1,5 +1,6 @@
 package com.tradedeck.shield
 
+import android.location.Location
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -56,6 +57,7 @@ class ShieldApi(private val base: String) {
 
     suspend fun capture(session: ShieldSession, jobId: String, challenge: ShieldChallenge,
                         originalJpeg: ByteArray, capturedAt: Instant, locationStated: String, purpose: String,
+                        locationFix: Location?,
                         integrityClient: ShieldPlayIntegrityClient): String = withContext(Dispatchers.IO) {
         val location = locationStated.trim()
         val why = purpose.trim()
@@ -78,6 +80,13 @@ class ShieldApi(private val base: String) {
             field("location_stated",location)
             field("purpose",why)
             field("captured_at",capturedAt.toString())
+            if (locationFix != null) {
+                field("lat",locationFix.latitude.toString())
+                field("lng",locationFix.longitude.toString())
+                if (locationFix.hasAccuracy()) field("accuracy_m",locationFix.accuracy.toString())
+                field("location_observed_at",Instant.ofEpochMilli(locationFix.time).toString())
+                field("mock_flag",locationFix.isFromMockProvider.toString())
+            }
             field("play_integrity_token",playToken)
             out.write("--$boundary\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"capture.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".toByteArray(Charsets.UTF_8))
             out.write(originalJpeg)
