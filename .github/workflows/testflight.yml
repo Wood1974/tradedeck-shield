@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       build_number:
-        description: "CFBundleVersion for this TestFlight build"
+        description: "New positive integer CFBundleVersion for this TestFlight build"
         required: true
-        default: "1"
 
 permissions:
   contents: read
@@ -14,7 +13,7 @@ permissions:
 jobs:
   testflight:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -23,13 +22,15 @@ jobs:
           CERT: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
           CERT_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
           PROFILE: ${{ secrets.IOS_APPSTORE_PROVISIONING_PROFILE_BASE64 }}
-          ASC_KEY_ID: 2FQX7UHKNU
-          ASC_ISSUER: b00416ce-6169-4876-a31c-f3f4a30cc74c
           ASC_KEY: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
         run: |
           for v in CERT CERT_PASSWORD PROFILE ASC_KEY; do
             test -n "${!v}" || { echo "::error::Missing required Apple signing/TestFlight secret: $v"; exit 1; }
           done
+          [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Build number must be a positive integer"; exit 1; }
+          printf '%s\n' "$ASC_KEY" > "$RUNNER_TEMP/AuthKey.p8"
+          openssl pkey -in "$RUNNER_TEMP/AuthKey.p8" -noout > /dev/null
 
       - name: Install Apple distribution certificate
         env:
@@ -37,32 +38,67 @@ jobs:
           CERT_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
         run: |
           KEYCHAIN="$RUNNER_TEMP/shield-signing.keychain-db"
-          echo "$CERT" | base64 --decode > "$RUNNER_TEMP/distribution.p12"
+          printf '%s' "$CERT" | base64 --decode > "$RUNNER_TEMP/distribution.p12"
           security create-keychain -p "shield-ci" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p "shield-ci" "$KEYCHAIN"
           security import "$RUNNER_TEMP/distribution.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
           security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
           security set-key-partition-list -S apple-tool:,apple: -s -k "shield-ci" "$KEYCHAIN"
+          security find-identity -v -p codesigning "$KEYCHAIN" | grep -q 'Apple Distribution:'
 
-      - name: Install App Store provisioning profile
+      - name: Install and validate App Store provisioning profile
+        id: profile
         env:
           PROFILE: ${{ secrets.IOS_APPSTORE_PROVISIONING_PROFILE_BASE64 }}
         run: |
-          echo "$PROFILE" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
-          UUID=$(security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" | /usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin)
+          printf '%s' "$PROFILE" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+          security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          python3 - <<'PY'
+          import datetime, os, plistlib
+          from pathlib import Path
+          profile = plistlib.loads((Path(os.environ["RUNNER_TEMP"]) / "profile.plist").read_bytes())
+          entitlements = profile["Entitlements"]
+          assert profile["TeamIdentifier"] == ["766457AWH4"], "Wrong Apple team"
+          assert entitlements["application-identifier"] == "766457AWH4.com.tradedeck.shield", "Wrong App ID"
+          assert entitlements.get("com.apple.developer.devicecheck.appattest-environment") == "production", "Production App Attest entitlement missing"
+          assert entitlements.get("get-task-allow") is False, "Not a distribution profile"
+          assert "ProvisionedDevices" not in profile, "Not an App Store Connect profile"
+          assert profile["ExpirationDate"] > datetime.datetime.utcnow(), "Profile expired"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f'name={profile["Name"]}', file=output)
+          PY
+          UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' "$RUNNER_TEMP/profile.plist")
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           cp "$RUNNER_TEMP/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
 
       - name: Set build number
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number }}
         run: |
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ inputs.build_number }}" ios/ShieldCamera/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" ios/ShieldCamera/Info.plist
 
       - name: Archive production app
+        env:
+          PROFILE_NAME: ${{ steps.profile.outputs.name }}
         run: |
-          xcodebuild             -project ios/ShieldCamera/ShieldCamera.xcodeproj             -scheme ShieldCamera             -configuration Release             -destination 'generic/platform=iOS'             -archivePath "$RUNNER_TEMP/TradeDeckShield.xcarchive"             DEVELOPMENT_TEAM=766457AWH4             PRODUCT_BUNDLE_IDENTIFIER=com.tradedeck.shield             archive
+          xcodebuild \
+            -project ios/ShieldCamera/ShieldCamera.xcodeproj \
+            -scheme ShieldCamera -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/TradeDeckShield.xcarchive" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            DEVELOPMENT_TEAM=766457AWH4 \
+            PRODUCT_BUNDLE_IDENTIFIER=com.tradedeck.shield archive
+          codesign -d --entitlements :- "$RUNNER_TEMP/TradeDeckShield.xcarchive/Products/Applications/ShieldCamera.app" > "$RUNNER_TEMP/signed-entitlements.plist" 2>/dev/null
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.devicecheck.appattest-environment' "$RUNNER_TEMP/signed-entitlements.plist")" = production
 
       - name: Export IPA
+        id: export
+        env:
+          PROFILE_NAME: ${{ steps.profile.outputs.name }}
         run: |
           cat > "$RUNNER_TEMP/ExportOptions.plist" <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -70,24 +106,36 @@ jobs:
           <plist version="1.0"><dict>
             <key>method</key><string>app-store-connect</string>
             <key>teamID</key><string>766457AWH4</string>
-            <key>signingStyle</key><string>automatic</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict>
+              <key>com.tradedeck.shield</key><string>PROFILE_NAME_PLACEHOLDER</string>
+            </dict>
             <key>uploadSymbols</key><true/>
           </dict></plist>
           PLIST
-          xcodebuild -exportArchive             -archivePath "$RUNNER_TEMP/TradeDeckShield.xcarchive"             -exportPath "$RUNNER_TEMP/export"             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+          /usr/libexec/PlistBuddy -c "Set :provisioningProfiles:com.tradedeck.shield $PROFILE_NAME" "$RUNNER_TEMP/ExportOptions.plist"
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/TradeDeckShield.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+          shopt -s nullglob
+          ipa_files=("$RUNNER_TEMP"/export/*.ipa)
+          test "${#ipa_files[@]}" -eq 1 || { echo "::error::Expected exactly one exported IPA"; exit 1; }
+          echo "ipa=${ipa_files[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Upload signed IPA artifact
         uses: actions/upload-artifact@v7
         with:
           name: tradedeck-shield-ios-signed
-          path: ${{ runner.temp }}/export/*.ipa
+          path: ${{ steps.export.outputs.ipa }}
           if-no-files-found: error
           retention-days: 7
 
       - name: Upload to TestFlight
         uses: apple-actions/upload-testflight-build@v3
         with:
-          app-path: ${{ runner.temp }}/export/ShieldCamera.ipa
+          app-path: ${{ steps.export.outputs.ipa }}
           issuer-id: b00416ce-6169-4876-a31c-f3f4a30cc74c
           api-key-id: 2FQX7UHKNU
           api-private-key: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
