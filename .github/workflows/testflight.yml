@@ -23,8 +23,6 @@ jobs:
           CERT: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
           CERT_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
           PROFILE: ${{ secrets.IOS_APPSTORE_PROVISIONING_PROFILE_BASE64 }}
-          ASC_KEY_ID: 2FQX7UHKNU
-          ASC_ISSUER: b00416ce-6169-4876-a31c-f3f4a30cc74c
           ASC_KEY: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
         run: |
           for v in CERT CERT_PASSWORD PROFILE ASC_KEY; do
@@ -37,57 +35,90 @@ jobs:
           CERT_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
         run: |
           KEYCHAIN="$RUNNER_TEMP/shield-signing.keychain-db"
-          echo "$CERT" | base64 --decode > "$RUNNER_TEMP/distribution.p12"
+          printf '%s' "$CERT" | base64 -D > "$RUNNER_TEMP/distribution.p12"
           security create-keychain -p "shield-ci" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p "shield-ci" "$KEYCHAIN"
           security import "$RUNNER_TEMP/distribution.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
           security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
           security set-key-partition-list -S apple-tool:,apple: -s -k "shield-ci" "$KEYCHAIN"
+          security find-identity -v -p codesigning "$KEYCHAIN" | grep -F 'Apple Distribution:' >/dev/null ||
+            { echo "::error::Distribution certificate has no usable signing identity"; exit 1; }
 
-      - name: Install App Store provisioning profile
+      - name: Validate and install App Store provisioning profile
         env:
           PROFILE: ${{ secrets.IOS_APPSTORE_PROVISIONING_PROFILE_BASE64 }}
         run: |
-          echo "$PROFILE" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
-          UUID=$(security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" | /usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin)
+          printf '%s' "$PROFILE" | base64 -D > "$RUNNER_TEMP/profile.mobileprovision"
+          security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")
+          TEAM=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$RUNNER_TEMP/profile.plist")
+          APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$RUNNER_TEMP/profile.plist")
+          ATTEST=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.devicecheck.appattest-environment' "$RUNNER_TEMP/profile.plist")
+          GET_TASK_ALLOW=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:get-task-allow' "$RUNNER_TEMP/profile.plist")
+          test "$TEAM" = "766457AWH4" && test "$APP_ID" = "766457AWH4.com.tradedeck.shield" &&
+            test "$ATTEST" = "production" && test "$GET_TASK_ALLOW" = "false" ||
+            { echo "::error::Profile must match team, bundle ID, production App Attest, and distribution signing"; exit 1; }
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          cp "$RUNNER_TEMP/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+          cp "$RUNNER_TEMP/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
 
       - name: Set build number
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number }}
         run: |
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ inputs.build_number }}" ios/ShieldCamera/Info.plist
+          [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] ||
+            { echo "::error::Build number must be a positive integer"; exit 1; }
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" ios/ShieldCamera/Info.plist
 
       - name: Archive production app
         run: |
-          xcodebuild             -project ios/ShieldCamera/ShieldCamera.xcodeproj             -scheme ShieldCamera             -configuration Release             -destination 'generic/platform=iOS'             -archivePath "$RUNNER_TEMP/TradeDeckShield.xcarchive"             DEVELOPMENT_TEAM=766457AWH4             PRODUCT_BUNDLE_IDENTIFIER=com.tradedeck.shield             archive
+          xcodebuild -project ios/ShieldCamera/ShieldCamera.xcodeproj \
+            -scheme ShieldCamera -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/TradeDeckShield.xcarchive" \
+            DEVELOPMENT_TEAM=766457AWH4 PRODUCT_BUNDLE_IDENTIFIER=com.tradedeck.shield \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Apple Distribution' \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" archive
 
       - name: Export IPA
         run: |
-          cat > "$RUNNER_TEMP/ExportOptions.plist" <<'PLIST'
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>method</key><string>app-store-connect</string>
             <key>teamID</key><string>766457AWH4</string>
-            <key>signingStyle</key><string>automatic</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>provisioningProfiles</key><dict>
+              <key>com.tradedeck.shield</key><string>$PROFILE_NAME</string>
+            </dict>
             <key>uploadSymbols</key><true/>
           </dict></plist>
           PLIST
-          xcodebuild -exportArchive             -archivePath "$RUNNER_TEMP/TradeDeckShield.xcarchive"             -exportPath "$RUNNER_TEMP/export"             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/TradeDeckShield.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+
+      - name: Select the signed IPA
+        id: ipa
+        run: |
+          mapfile -d '' IPAS < <(find "$RUNNER_TEMP/export" -maxdepth 1 -name '*.ipa' -print0)
+          test "${#IPAS[@]}" -eq 1 ||
+            { echo "::error::Expected exactly one signed IPA in export"; exit 1; }
+          echo "path=${IPAS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Upload signed IPA artifact
         uses: actions/upload-artifact@v7
         with:
           name: tradedeck-shield-ios-signed
-          path: ${{ runner.temp }}/export/*.ipa
+          path: ${{ steps.ipa.outputs.path }}
           if-no-files-found: error
           retention-days: 7
 
       - name: Upload to TestFlight
         uses: apple-actions/upload-testflight-build@v3
         with:
-          app-path: ${{ runner.temp }}/export/ShieldCamera.ipa
+          app-path: ${{ steps.ipa.outputs.path }}
           issuer-id: b00416ce-6169-4876-a31c-f3f4a30cc74c
           api-key-id: 2FQX7UHKNU
           api-private-key: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
