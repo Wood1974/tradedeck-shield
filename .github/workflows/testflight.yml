@@ -1,9 +1,6 @@
 name: Shield iOS TestFlight
 
 on:
-  push:
-    branches:
-      - fix/authoritative-capture-location
   workflow_dispatch:
     inputs:
       build_number:
