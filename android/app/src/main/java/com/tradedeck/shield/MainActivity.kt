@@ -39,6 +39,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.launch
 import java.io.File
@@ -52,6 +55,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        cacheDir.listFiles()?.filter { it.name.startsWith("shield-") && it.name.endsWith(".jpg") }?.forEach { it.delete() }
         val required = arrayOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION)
         if (required.any { ContextCompat.checkSelfPermission(this,it) != PackageManager.PERMISSION_GRANTED }) permissions.launch(required)
         setContent { Surface { ShieldCameraScreen() } }
@@ -62,6 +66,7 @@ class MainActivity : ComponentActivity() {
 private fun ShieldCameraScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
     var baseUrl by remember { mutableStateOf("https://tradedeck-shield.onrender.com") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -79,6 +84,21 @@ private fun ShieldCameraScreen() {
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
 
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && challenge != null) {
+                capturedFile?.delete()
+                capturedFile = null
+                photoCapturedAt = null
+                captureLocation = null
+                challenge = null
+                message = "Capture interrupted. Start again with a new challenge."
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("SHIELD")
         if (session == null) {
@@ -94,8 +114,8 @@ private fun ShieldCameraScreen() {
                 }
             }, enabled = !busy && email.isNotBlank() && password.isNotBlank()) { Text("Sign in") }
         } else {
-            OutlinedTextField(jobId, { jobId = it }, label = { Text("Job ID") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(pointId, { pointId = it }, label = { Text("Point ID") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(jobId, { jobId = it }, label = { Text("Job ID") }, modifier = Modifier.fillMaxWidth(), enabled = challenge == null)
+            OutlinedTextField(pointId, { pointId = it }, label = { Text("Point ID") }, modifier = Modifier.fillMaxWidth(), enabled = challenge == null)
             if (challenge == null) {
                 Button(onClick = {
                     busy = true
@@ -117,14 +137,18 @@ private fun ShieldCameraScreen() {
                         val file = File(context.cacheDir,"shield-${System.nanoTime()}.jpg")
                         capture.takePicture(ImageCapture.OutputFileOptions.Builder(file).build(), ContextCompat.getMainExecutor(context),
                             object : ImageCapture.OnImageSavedCallback {
-                                override fun onError(exception: ImageCaptureException) { message = "Capture failed: ${exception.message}" }
+                                override fun onError(exception: ImageCaptureException) { file.delete(); message = "Capture failed: ${exception.message}" }
                                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                                    if (challenge == null || !lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                                        file.delete()
+                                        return
+                                    }
                                     photoCapturedAt = java.time.Instant.now()
                                     captureLocation = lastKnownSiteFix(context)
                                     capturedFile = file
                                 }
                             })
-                    }) { Text("CAPTURE") }
+                    }, enabled = !busy) { Text("CAPTURE") }
                 }
             } else {
                 Image(painter = rememberAsyncImagePainter(capturedFile), contentDescription = "Fresh Shield capture",
