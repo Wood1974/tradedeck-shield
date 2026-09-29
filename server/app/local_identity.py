@@ -61,6 +61,10 @@ class LocalIdentity:
                 created_at REAL NOT NULL,
                 PRIMARY KEY(account_id,job_id,point_id)
               );
+              CREATE TABLE IF NOT EXISTS local_job_locations (
+                job_id TEXT PRIMARY KEY, latitude REAL NOT NULL, longitude REAL NOT NULL,
+                set_by TEXT NOT NULL REFERENCES local_accounts(id), updated_at REAL NOT NULL
+              );
             """)
 
     @staticmethod
@@ -134,6 +138,26 @@ class LocalIdentity:
                 raise ValueError("account_not_found")
             db.execute("INSERT OR IGNORE INTO local_job_grants VALUES(?,?,?,?,?)",
                        (account_id,job_id,point_id,actor.id,time.time()))
+
+    def set_job_location(self, actor: LocalAccount, job_id: str, latitude: float, longitude: float):
+        from math import isfinite
+        if actor.role != "admin":
+            raise PermissionError("admin_required")
+        if not job_id.strip() or len(job_id) > 200:
+            raise ValueError("invalid_job")
+        if not all(isfinite(value) for value in (latitude, longitude)) or not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            raise ValueError("invalid_job_location")
+        with self.db() as db:
+            db.execute("""INSERT INTO local_job_locations(job_id,latitude,longitude,set_by,updated_at)
+                          VALUES(?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET
+                          latitude=excluded.latitude,longitude=excluded.longitude,
+                          set_by=excluded.set_by,updated_at=excluded.updated_at""",
+                       (job_id, latitude, longitude, actor.id, time.time()))
+
+    def job_location(self, job_id: str) -> tuple[float, float] | None:
+        with self.db() as db:
+            row = db.execute("SELECT latitude,longitude FROM local_job_locations WHERE job_id=?", (job_id,)).fetchone()
+        return (row["latitude"], row["longitude"]) if row else None
 
     def allowed(self, account_id: str, job_id: str, point_id: str) -> bool:
         with self.db() as db:
