@@ -43,6 +43,11 @@ class LocalJobGrant(BaseModel):
 class LocalPasswordReset(BaseModel):
     password: str
 
+class LocalJobLocation(BaseModel):
+    job_id: str
+    latitude: float
+    longitude: float
+
 def local_admin(request:Request):
     if os.getenv("SHIELD_API_AUTH_MODE", "development") != "local":
         raise HTTPException(404,"local_identity_disabled")
@@ -93,6 +98,13 @@ def local_grant_job(request:Request,body:LocalJobGrant):
     try: local.grant(admin,body.account_id,body.job_id,body.point_id)
     except ValueError as exc: raise HTTPException(422,str(exc)) from exc
     return {"granted":True,**body.model_dump()}
+
+@app.put("/shield/admin/job-locations")
+def local_set_job_location(request:Request,body:LocalJobLocation):
+    local,admin=local_admin(request)
+    try: local.set_job_location(admin,body.job_id,body.latitude,body.longitude)
+    except ValueError as exc: raise HTTPException(422,str(exc)) from exc
+    return {"saved":True,**body.model_dump()}
 
 @app.delete("/shield/admin/job-grants")
 def local_revoke_job(request:Request,body:LocalJobGrant):
@@ -207,7 +219,7 @@ async def capture(request:Request, job_id:str,
     photo:UploadFile=File(...)):
     actor=actor_for(request, account_id)
     account_id=actor.account_id
-    try: authorize_job(account_id,job_id,point_id)
+    try: authorization=authorize_job(account_id,job_id,point_id)
     except AuthorizationError as e: raise HTTPException(403,str(e))
     if photo.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(415,"unsupported_photo_type")
@@ -242,10 +254,18 @@ async def capture(request:Request, job_id:str,
     except ValueError as e: raise HTTPException(409,str(e))
     if att_result.get("trusted") is True and att.update_counter(attestation_key_id, att_result["counter"]) is False:
         raise HTTPException(409,"attestation_counter_update_failed")
-    # Location is a risk signal, never proof of physical presence. Section 13 will
-    # replace client-supplied expected coordinates with authoritative TradeDeck job data.
+    # The uploader cannot choose the expected site coordinates. In standalone mode
+    # they come from the administrator's job pin; integrations may supply them in
+    # the trusted server-to-server authorization response.
+    if authorization["source"] == "shield_local":
+        from .local_identity import identity
+        pin=identity().job_location(job_id)
+        trusted_lat,trusted_lng=pin if pin else (None,None)
+    else:
+        trusted_lat=authorization.get("expected_lat")
+        trusted_lng=authorization.get("expected_lng")
     location_result=evaluate_location(lat=lat,lng=lng,accuracy_m=accuracy_m,
-      observed_at=location_observed_at,expected_lat=expected_lat,expected_lng=expected_lng,
+      observed_at=location_observed_at,expected_lat=trusted_lat,expected_lng=trusted_lng,
       mock_flag=mock_flag)
     verdict=location_result["verdict"]; reasons=location_result["reasons"]
     eid=str(uuid.uuid4()); written=datetime.now(timezone.utc).isoformat()
@@ -254,7 +274,7 @@ async def capture(request:Request, job_id:str,
     rel=store.save_original(eid,job_id,account_id,raw)
     store.create_evidence(id=eid,job_id=job_id,point_id=point_id,account_id=account_id,nonce=nonce,
       photo_sha256=photo_sha,note_sha256=note_sha,bind_hash=bh,captured_at=captured_at,written_at=written,
-      location_json=json.dumps({"lat":lat,"lng":lng,"accuracy_m":accuracy_m,"observed_at":location_observed_at,"expected_lat":expected_lat,"expected_lng":expected_lng,**location_result},sort_keys=True),
+      location_json=json.dumps({"lat":lat,"lng":lng,"accuracy_m":accuracy_m,"observed_at":location_observed_at,"expected_lat":trusted_lat,"expected_lng":trusted_lng,**location_result},sort_keys=True),
       attestation_json=json.dumps({"apple":att_result,"play_integrity":play_result,"trusted_timestamp":timestamp_result},sort_keys=True),original_path=rel,status="sealed",state="sealed",actor_id=account_id,state_history=["capture_received","verified","sealed"])
     if amendment_of:
         parent=store.get(amendment_of)
