@@ -16,8 +16,9 @@ offers a gallery or file-picker path.
    iPhone sends an App Attest assertion, Android sends a Play Integrity token.
 5. The server rehashes the received original and note, verifies the platform
    signal and nonce, and writes the evidence and custody record.
-6. Leaving the app during an unfinished capture discards the local photo and
-   challenge. Late camera callbacks are discarded.
+6. Leaving the app before upload discards the local photo and challenge.
+   Late camera callbacks are discarded. If an upload has already started,
+   the server may still finish sealing it; check the evidence ID on return.
 
 iPhone holds the original in memory. Android uses app-private cache and
 removes abandoned Shield JPEGs at the next launch. The app sends available
