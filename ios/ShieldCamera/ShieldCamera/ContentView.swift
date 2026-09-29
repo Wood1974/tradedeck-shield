@@ -1,5 +1,6 @@
 import SwiftUI
 import CryptoKit
+import CoreLocation
 
 struct ContentView: View {
     @StateObject private var state = AppState()
