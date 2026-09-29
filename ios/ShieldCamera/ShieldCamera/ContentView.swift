@@ -54,6 +54,7 @@ struct ContentView: View {
                                           purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
                         }
                         Button("Sign out") { discardCapture(); state.token = ""; state.accountID = "" }
+                            .disabled(busy)
                     }
                     Text(result).font(.footnote.monospaced()).textSelection(.enabled)
                 }.padding().navigationTitle("Capture")
