@@ -1,6 +1,9 @@
 name: Shield iOS TestFlight
 
 on:
+  push:
+    branches:
+      - fix/authoritative-capture-location
   workflow_dispatch:
     inputs:
       build_number:
@@ -66,7 +69,7 @@ jobs:
 
       - name: Set build number
         env:
-          BUILD_NUMBER: ${{ inputs.build_number }}
+          BUILD_NUMBER: ${{ inputs.build_number || github.run_id }}
         run: |
           [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] ||
             { echo "::error::Build number must be a positive integer"; exit 1; }
