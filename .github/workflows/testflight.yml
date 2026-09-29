@@ -102,8 +102,8 @@ jobs:
       - name: Select the signed IPA
         id: ipa
         run: |
-          mapfile -d '' IPAS < <(find "$RUNNER_TEMP/export" -maxdepth 1 -name '*.ipa' -print0)
-          test "${#IPAS[@]}" -eq 1 ||
+          IPAS=("$RUNNER_TEMP"/export/*.ipa)
+          test -f "${IPAS[0]}" && test "${#IPAS[@]}" -eq 1 ||
             { echo "::error::Expected exactly one signed IPA in export"; exit 1; }
           echo "path=${IPAS[0]}" >> "$GITHUB_OUTPUT"
 
