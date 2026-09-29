@@ -55,7 +55,7 @@ jobs:
           printf '%s' "$PROFILE" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
           security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
           python3 - <<'PY'
-          import datetime, os, plistlib
+          import datetime, hashlib, os, plistlib
           from pathlib import Path
           profile = plistlib.loads((Path(os.environ["RUNNER_TEMP"]) / "profile.plist").read_bytes())
           entitlements = profile["Entitlements"]
@@ -65,6 +65,11 @@ jobs:
           assert entitlements.get("get-task-allow") is False, "Not a distribution profile"
           assert "ProvisionedDevices" not in profile, "Not an App Store Connect profile"
           assert profile["ExpirationDate"] > datetime.datetime.utcnow(), "Profile expired"
+          certificate_hashes = {hashlib.sha1(cert).hexdigest().upper() for cert in profile["DeveloperCertificates"]}
+          identity_list = os.popen(
+              f'security find-identity -v -p codesigning "{os.environ["RUNNER_TEMP"]}/shield-signing.keychain-db"'
+          ).read()
+          assert any(fingerprint in identity_list for fingerprint in certificate_hashes), "Distribution certificate is not in the profile"
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               print(f'name={profile["Name"]}', file=output)
           PY
