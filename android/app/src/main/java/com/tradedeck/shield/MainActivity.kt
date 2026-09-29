@@ -1,6 +1,9 @@
 package com.tradedeck.shield
 
 import android.Manifest
+import android.content.Context
+import android.location.Location
+import android.location.LocationManager
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
@@ -70,6 +73,7 @@ private fun ShieldCameraScreen() {
     var camera by remember { mutableStateOf<Camera?>(null) }
     var capturedFile by remember { mutableStateOf<File?>(null) }
     var photoCapturedAt by remember { mutableStateOf<java.time.Instant?>(null) }
+    var captureLocation by remember { mutableStateOf<Location?>(null) }
     var locationStated by remember { mutableStateOf("") }
     var purpose by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -116,6 +120,7 @@ private fun ShieldCameraScreen() {
                                 override fun onError(exception: ImageCaptureException) { message = "Capture failed: ${exception.message}" }
                                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                                     photoCapturedAt = java.time.Instant.now()
+                                    captureLocation = lastKnownSiteFix(context)
                                     capturedFile = file
                                 }
                             })
@@ -128,7 +133,7 @@ private fun ShieldCameraScreen() {
                 OutlinedTextField(purpose, { purpose = it }, label = { Text("What does it document?") }, modifier = Modifier.fillMaxWidth())
                 Text("These statements are yours; Shield does not infer them from location data.")
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    OutlinedButton(onClick = { capturedFile?.delete(); capturedFile = null; photoCapturedAt = null; challenge = null }) { Text("Retake") }
+                    OutlinedButton(onClick = { capturedFile?.delete(); capturedFile = null; photoCapturedAt = null; captureLocation = null; challenge = null }) { Text("Retake") }
                     Button(onClick = {
                         val original = capturedFile?.readBytes() ?: return@Button
                         val active = session ?: return@Button
@@ -138,9 +143,9 @@ private fun ShieldCameraScreen() {
                         scope.launch {
                             try {
                                 val integrity = ShieldPlayIntegrityClient(context,BuildConfig.SHIELD_CLOUD_PROJECT_NUMBER)
-                                val evidence = ShieldApi(baseUrl).capture(active,jobId,current,original,capturedAt,locationStated,purpose,integrity)
+                                val evidence = ShieldApi(baseUrl).capture(active,jobId,current,original,capturedAt,locationStated,purpose,captureLocation,integrity)
                                 message = "SEALED — evidence ID: $evidence"
-                                capturedFile?.delete(); capturedFile = null; photoCapturedAt = null; challenge = null
+                                capturedFile?.delete(); capturedFile = null; photoCapturedAt = null; captureLocation = null; challenge = null
                                 locationStated = ""; purpose = ""
                             } catch (e: Exception) { message = "Seal failed: ${e.message}" }
                             finally { busy = false }
@@ -148,10 +153,21 @@ private fun ShieldCameraScreen() {
                     }, enabled = !busy && locationStated.isNotBlank() && purpose.isNotBlank()) { Text("Seal") }
                 }
             }
-            OutlinedButton(onClick = { session = null; capturedFile?.delete(); capturedFile = null; photoCapturedAt = null; challenge = null }) { Text("Sign out") }
+            OutlinedButton(onClick = { session = null; capturedFile?.delete(); capturedFile = null; photoCapturedAt = null; captureLocation = null; challenge = null }) { Text("Sign out") }
         }
         Text(message)
     }
+}
+
+private fun lastKnownSiteFix(context: Context): Location? {
+    if (ContextCompat.checkSelfPermission(context,Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+        ContextCompat.checkSelfPermission(context,Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null
+    val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    return try {
+        listOf(LocationManager.GPS_PROVIDER,LocationManager.NETWORK_PROVIDER)
+            .mapNotNull { provider -> if (manager.isProviderEnabled(provider)) manager.getLastKnownLocation(provider) else null }
+            .maxByOrNull { it.time }?.let { Location(it) }
+    } catch (_: SecurityException) { null }
 }
 
 @Composable
