@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Shield captures only fresh CameraX bytes; no gallery import or file picker. */
 class MainActivity : ComponentActivity() {
@@ -82,6 +83,7 @@ private fun ShieldCameraScreen() {
     var locationStated by remember { mutableStateOf("") }
     var purpose by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var takingPhoto by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
 
     DisposableEffect(lifecycleOwner) {
@@ -92,6 +94,7 @@ private fun ShieldCameraScreen() {
                 photoCapturedAt = null
                 captureLocation = null
                 challenge = null
+                takingPhoto = false
                 message = "Capture interrupted. Start again with a new challenge."
             }
         }
@@ -134,21 +137,28 @@ private fun ShieldCameraScreen() {
                     OutlinedButton(onClick = { camera?.cameraControl?.enableTorch(camera?.cameraInfo?.torchState?.value != 1) }) { Text("Flash") }
                     Button(onClick = {
                         val capture = imageCapture ?: return@Button
+                        takingPhoto = true
                         val file = File(context.cacheDir,"shield-${System.nanoTime()}.jpg")
                         capture.takePicture(ImageCapture.OutputFileOptions.Builder(file).build(), ContextCompat.getMainExecutor(context),
                             object : ImageCapture.OnImageSavedCallback {
-                                override fun onError(exception: ImageCaptureException) { file.delete(); message = "Capture failed: ${exception.message}" }
+                                override fun onError(exception: ImageCaptureException) {
+                                    file.delete()
+                                    takingPhoto = false
+                                    message = "Capture failed: ${exception.message}"
+                                }
                                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                                     if (challenge == null || !lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                                         file.delete()
+                                        takingPhoto = false
                                         return
                                     }
+                                    takingPhoto = false
                                     photoCapturedAt = java.time.Instant.now()
                                     captureLocation = lastKnownSiteFix(context)
                                     capturedFile = file
                                 }
                             })
-                    }, enabled = !busy) { Text("CAPTURE") }
+                    }, enabled = !busy && !takingPhoto && imageCapture != null) { Text("CAPTURE") }
                 }
             } else {
                 Image(painter = rememberAsyncImagePainter(capturedFile), contentDescription = "Fresh Shield capture",
@@ -196,17 +206,27 @@ private fun lastKnownSiteFix(context: Context): Location? {
 
 @Composable
 private fun CameraPreview(modifier: Modifier, onReady: (ImageCapture,Camera) -> Unit, onError: (String) -> Unit) {
+    val disposed = remember { AtomicBoolean(false) }
+    var provider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+    DisposableEffect(Unit) {
+        onDispose {
+            disposed.set(true)
+            provider?.unbindAll()
+        }
+    }
     AndroidView(modifier = modifier, factory = { context ->
         PreviewView(context).also { view ->
             val future = ProcessCameraProvider.getInstance(context)
             future.addListener({
                 try {
-                    val provider = future.get()
+                    if (disposed.get()) return@addListener
+                    val activeProvider = future.get()
+                    provider = activeProvider
                     val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
                     val capture = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                         .setJpegQuality(100).build()
-                    provider.unbindAll()
-                    val active = provider.bindToLifecycle(context as LifecycleOwner,CameraSelector.DEFAULT_BACK_CAMERA,preview,capture)
+                    activeProvider.unbindAll()
+                    val active = activeProvider.bindToLifecycle(context as LifecycleOwner,CameraSelector.DEFAULT_BACK_CAMERA,preview,capture)
                     onReady(capture,active)
                 } catch (e: Exception) { onError("Camera unavailable: ${e.message}") }
             },ContextCompat.getMainExecutor(context))
