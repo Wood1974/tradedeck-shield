@@ -1,20 +1,36 @@
-# Shield Native Camera — Section 2
+# Shield native camera
 
-## Scope implemented
+The iPhone app captures JPEG bytes with AVFoundation's rear camera. The Android
+app uses CameraX's rear camera and holds its JPEG in app-private cache until
+the user seals, retakes, signs out, or leaves the capture session. Neither app
+offers a gallery or file-picker path.
 
-- iOS uses AVFoundation's rear camera directly.
-- Android uses CameraX's rear camera directly.
-- There is no gallery/file-picker/import path in the Shield capture UI.
-- Camera permission is requested before capture.
-- Location permission is requested on Android; iOS location remains handled by the existing LocationProvider.
-- Captures are held as original JPEG bytes for the next protocol stage.
-- Users can review a captured image and either use it or retake it.
-- iOS exposes flash capture control; Android exposes torch control.
-- Camera failures and permission failures are surfaced to the user.
-- Android's capture handoff is an explicit seam for the Section 3/API layer and does not seal evidence by itself.
+## Capture flow
 
-## Deliberate boundaries
+1. Sign in and request a server challenge for a job and point.
+2. Take a fresh photo in the native camera. Job and point cannot change while
+   that challenge is active.
+3. Review the photo and write both required statements: stated location and
+   what the frame documents. Retake requests a new challenge.
+4. The app binds the original photo and note to the challenge and account;
+   iPhone sends an App Attest assertion, Android sends a Play Integrity token.
+5. The server rehashes the received original and note, verifies the platform
+   signal and nonce, and writes the evidence and custody record.
+6. Leaving the app during an unfinished capture discards the local photo and
+   challenge. Late camera callbacks are discarded.
 
-Section 2 does not implement platform attestation, server authorization, storage custody, or evidence sealing. Those belong to later sections.
+iPhone holds the original in memory. Android uses app-private cache and
+removes abandoned Shield JPEGs at the next launch. The app sends available
+OS location observations and their timestamps. Location is a risk signal,
+not proof of physical presence; a stale or absent observation is flagged.
+Android currently samples the newest last-known GPS/network fix at shutter
+completion. It may be stale; the server evaluates its actual timestamp.
 
-The camera does not claim that a photograph is verified merely because it was captured by the native camera.
+## Release validation
+
+Simulator and debug builds only verify compilation. A production-signed
+iPhone installed through TestFlight must complete App Attest registration,
+capture, seal, and independent verification on a physical device. Android
+must be tested from a Play-distributed build with Play Integrity. Test
+backgrounding before and after the shutter, retake, denied camera permission,
+missing location permission, missing job pin, and a revoked job grant.
