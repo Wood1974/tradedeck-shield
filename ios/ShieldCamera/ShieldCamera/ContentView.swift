@@ -4,12 +4,14 @@ import CryptoKit
 struct ContentView: View {
     @StateObject private var state = AppState()
     @StateObject private var location = LocationProvider()
+    @Environment(\.scenePhase) private var scenePhase
     private let attest = AppAttestManager()
     @State private var email = ""
     @State private var password = ""
     @State private var challenge: Challenge?
     @State private var photo: Data?
     @State private var photoCapturedAt: Date?
+    @State private var capturedLocation: CLLocation?
     @State private var locationStated = ""
     @State private var purpose = ""
     @State private var camera = false
@@ -31,7 +33,9 @@ struct ContentView: View {
                             .disabled(busy || email.isEmpty || password.isEmpty)
                     } else {
                         TextField("Job ID", text: $state.jobID).textFieldStyle(.roundedBorder)
+                            .disabled(challenge != nil)
                         TextField("Point ID", text: $state.pointID).textFieldStyle(.roundedBorder)
+                            .disabled(challenge != nil)
                         if let photo, let image = UIImage(data: photo) {
                             Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 250)
                             Text("Photo SHA-256 \(sha256Hex(photo).prefix(16))…").font(.caption.monospaced())
@@ -48,21 +52,42 @@ struct ContentView: View {
                                 .disabled(locationStated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                                           purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
                         }
-                        Button("Sign out") { state.token = ""; state.accountID = ""; photo = nil; photoCapturedAt = nil; challenge = nil }
+                        Button("Sign out") { discardCapture(); state.token = ""; state.accountID = "" }
                     }
                     Text(result).font(.footnote.monospaced()).textSelection(.enabled)
                 }.padding().navigationTitle("Capture")
             }
         }
         .sheet(isPresented: $camera) {
-            CameraView(onPhoto: { photo = $0; photoCapturedAt = Date(); camera = false }, onCancel: { camera = false }).ignoresSafeArea()
+            CameraView(onPhoto: {
+                photo = $0
+                photoCapturedAt = Date()
+                capturedLocation = location.location
+                camera = false
+            }, onCancel: { discardCapture() }).ignoresSafeArea()
         }
         .task { location.start() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background && (camera || photo != nil) {
+                discardCapture()
+                result = "Capture interrupted. Start again with a new challenge."
+            }
+        }
     }
 
     private func api() throws -> ShieldAPI {
         guard let base = URL(string: state.apiBaseURL), base.scheme == "https" else { throw URLError(.badURL) }
         return ShieldAPI(base: base, token: state.token.isEmpty ? nil : state.token)
+    }
+
+    private func discardCapture() {
+        camera = false
+        photo = nil
+        photoCapturedAt = nil
+        capturedLocation = nil
+        challenge = nil
+        locationStated = ""
+        purpose = ""
     }
 
     private func signIn() async {
@@ -79,9 +104,8 @@ struct ContentView: View {
     private func begin() async {
         busy = true; defer { busy = false }
         do {
+            discardCapture()
             challenge = try await api().challenge(jobID: state.jobID, pointID: state.pointID, accountID: state.accountID)
-            photo = nil
-            photoCapturedAt = nil
             camera = true
         } catch { result = "Challenge failed: \(error)" }
     }
@@ -98,7 +122,7 @@ struct ContentView: View {
             try await attest.ensureAttested(accountID: state.accountID, api: client)
             let assertion = try await attest.assertion(accountID: state.accountID,
                                                        clientDataHash: Data(SHA256.hash(data: Data(bind.utf8))))
-            let fix = location.location
+            let fix = capturedLocation
             let position = fix.map { ($0.coordinate.latitude, $0.coordinate.longitude, $0.horizontalAccuracy) }
             let observedAt = fix.map { ISO8601DateFormatter().string(from: $0.timestamp) }
             let simulated = fix?.sourceInformation?.isSimulatedBySoftware == true ? true : nil
@@ -106,6 +130,7 @@ struct ContentView: View {
                                                     photo: photo, locationStated: locationStated, purpose: purpose,
                                                     capturedAt: ISO8601DateFormatter().string(from: photoCapturedAt),
                                                     location: position, locationObservedAt: observedAt, mockFlag: simulated, attestation: assertion)
+            discardCapture()
             result = "SEALED\nEvidence ID: \(response.evidence_id)\nBind: \(response.bind_hash)\nServer time: \(response.written_at)"
         } catch { result = "Seal failed: \(error)" }
     }
