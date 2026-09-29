@@ -127,6 +127,7 @@ struct ContentView: View {
             let position = fix.map { ($0.coordinate.latitude, $0.coordinate.longitude, $0.horizontalAccuracy) }
             let observedAt = fix.map { ISO8601DateFormatter().string(from: $0.timestamp) }
             let simulated = fix?.sourceInformation?.isSimulatedBySoftware == true ? true : nil
+            guard self.challenge?.nonce == challenge.nonce, self.photo != nil else { return }
             let response = try await client.capture(jobID: state.jobID, challenge: challenge, accountID: state.accountID,
                                                     photo: photo, locationStated: locationStated, purpose: purpose,
                                                     capturedAt: ISO8601DateFormatter().string(from: photoCapturedAt),
