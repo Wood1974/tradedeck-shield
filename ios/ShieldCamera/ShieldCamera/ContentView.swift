@@ -98,11 +98,14 @@ struct ContentView: View {
             try await attest.ensureAttested(accountID: state.accountID, api: client)
             let assertion = try await attest.assertion(accountID: state.accountID,
                                                        clientDataHash: Data(SHA256.hash(data: Data(bind.utf8))))
-            let position = location.location.map { ($0.coordinate.latitude, $0.coordinate.longitude, $0.horizontalAccuracy) }
+            let fix = location.location
+            let position = fix.map { ($0.coordinate.latitude, $0.coordinate.longitude, $0.horizontalAccuracy) }
+            let observedAt = fix.map { ISO8601DateFormatter().string(from: $0.timestamp) }
+            let simulated = fix?.sourceInformation?.isSimulatedBySoftware == true ? true : nil
             let response = try await client.capture(jobID: state.jobID, challenge: challenge, accountID: state.accountID,
                                                     photo: photo, locationStated: locationStated, purpose: purpose,
                                                     capturedAt: ISO8601DateFormatter().string(from: photoCapturedAt),
-                                                    location: position, mockFlag: nil, attestation: assertion)
+                                                    location: position, locationObservedAt: observedAt, mockFlag: simulated, attestation: assertion)
             result = "SEALED\nEvidence ID: \(response.evidence_id)\nBind: \(response.bind_hash)\nServer time: \(response.written_at)"
         } catch { result = "Seal failed: \(error)" }
     }
