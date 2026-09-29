@@ -97,3 +97,43 @@ def test_production_health_requires_platform_configuration(monkeypatch,tmp_path)
     monkeypatch.setenv('GOOGLE_PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON',
                        '{"client_email":"test@example.com","private_key":"test","token_uri":"https://example.com"}')
     assert client.get('/shield/v1/health').status_code==200
+
+
+def test_location_pin_is_admin_owned_and_upload_cannot_override_it(monkeypatch,tmp_path):
+    from datetime import datetime, timezone
+    import importlib
+    main = importlib.import_module('app.main')
+    local,admin,client=setup_local(monkeypatch,tmp_path)
+    monkeypatch.setenv('SHIELD_ATTESTATION_MODE','production')
+    monkeypatch.setenv('SHIELD_PLAY_INTEGRITY_MODE','production')
+    monkeypatch.setattr(main.att,'verify_assertion',lambda *args,**kwargs: {'trusted':True,'status':'verified','counter':1})
+    monkeypatch.setattr(main.att,'update_counter',lambda *args,**kwargs: True)
+
+    admin_token=login(client,'admin@example.com','admin-password-123').json()['access_token']
+    admin_header={'Authorization':'Bearer '+admin_token}
+    created=client.post('/shield/admin/accounts',json={'email':'worker@example.com','password':'worker-password-123'},headers=admin_header)
+    worker_id=created.json()['account_id']
+    worker_header={'Authorization':'Bearer '+login(client,'worker@example.com','worker-password-123').json()['access_token']}
+    job={'account_id':worker_id,'job_id':'location-job','point_id':'p1'}
+    assert client.post('/shield/admin/job-grants',json=job,headers=admin_header).status_code==200
+
+    pin={'job_id':'location-job','latitude':40.5,'longitude':-111.9}
+    assert client.put('/shield/admin/job-locations',json=pin,headers=worker_header).status_code==403
+    assert client.put('/shield/admin/job-locations',json={**pin,'latitude':91},headers=admin_header).status_code==422
+    assert client.put('/shield/admin/job-locations',json=pin,headers=admin_header).status_code==200
+    assert local.job_location('location-job')==(40.5,-111.9)
+
+    nonce=client.post('/shield/jobs/location-job/challenge',data={'point_id':'p1'},headers=worker_header).json()['nonce']
+    result=client.post('/shield/jobs/location-job/photos',headers=worker_header,data={
+        'point_id':'p1','nonce':nonce,'location_stated':'Job site','purpose':'Document framing',
+        'captured_at':datetime.now(timezone.utc).isoformat(),'lat':'40.5','lng':'-111.9',
+        'accuracy_m':'10','location_observed_at':datetime.now(timezone.utc).isoformat(),
+        'mock_flag':'false','expected_lat':'0','expected_lng':'0',
+        'attestation_key_id':'key','attestation_assertion':'assertion',
+    },files={'photo':('photo.jpg',b'original-photo','image/jpeg')})
+    assert result.status_code==200, result.text
+    assert result.json()['location']['verdict']=='consistent'
+    row=main.store.get(result.json()['evidence_id'])
+    import json
+    stored=json.loads(row['location_json'])
+    assert (stored['expected_lat'],stored['expected_lng'])==(40.5,-111.9)
