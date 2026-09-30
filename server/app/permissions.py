@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, httpx
+import os, re, httpx
 class AuthorizationError(Exception): pass
 
 def authorize_job(account_id:str,job_id:str,point_id:str)->dict:
@@ -7,6 +7,8 @@ def authorize_job(account_id:str,job_id:str,point_id:str)->dict:
     Never accepts a client role claim as authority.
     """
     mode = os.getenv("SHIELD_AUTHZ_MODE", "development")
+    if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", value) for value in (account_id, job_id, point_id)):
+        raise AuthorizationError("invalid_capture_identifier")
     if os.getenv("SHIELD_API_AUTH_MODE") == "local" and mode != "local":
         raise AuthorizationError("local_job_authorization_not_configured")
     if mode == "local":

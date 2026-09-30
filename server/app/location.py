@@ -59,7 +59,7 @@ def evaluate_location(*, lat=None, lng=None, accuracy_m=None, observed_at=None,
 
     if lat is None or lng is None:
         reasons.append("location_missing")
-        return {"verdict": "flag", "reasons": reasons, "distance_m": None,
+        return {"verdict": "reject" if hard_reject else "flag", "reasons": reasons, "distance_m": None,
                 "age_seconds": None, "accuracy_m": accuracy_m}
     if not _valid_coords(lat, lng):
         return {"verdict": "reject", "reasons": ["invalid_coordinates"], "distance_m": None,

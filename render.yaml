@@ -4,12 +4,14 @@ services:
     runtime: docker
     plan: starter
     dockerfilePath: Dockerfile
-    healthCheckPath: /health
+    healthCheckPath: /shield/v1/health
     disk:
       name: shield-data
       mountPath: /data
       sizeGB: 10
     envVars:
+      - key: SHIELD_ENABLED_PLATFORMS
+        value: ios
       - key: SHIELD_API_AUTH_MODE
         value: local
       - key: SHIELD_ATTESTATION_MODE
@@ -26,5 +28,3 @@ services:
         value: 766457AWH4.com.tradedeck.shield
       - key: SHIELD_PLAY_PACKAGE_NAME
         value: com.tradedeck.shield
-      - key: GOOGLE_PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON
-        sync: false

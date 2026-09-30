@@ -28,6 +28,12 @@ att=AttestationVerifier(att_mode,os.getenv("SHIELD_APP_ID",""),store=store)
 play=PlayIntegrityVerifier(os.getenv("SHIELD_PLAY_INTEGRITY_MODE",att_mode),os.getenv("SHIELD_PLAY_PACKAGE_NAME", "com.tradedeck.shield"))
 TTL=int(os.getenv("SHIELD_CHALLENGE_TTL_SECONDS","120"))
 
+def enabled_platforms():
+    platforms = {p.strip() for p in os.getenv("SHIELD_ENABLED_PLATFORMS", "ios,android").split(",") if p.strip()}
+    if not platforms or not platforms <= {"ios", "android"}:
+        raise HTTPException(503, "enabled_platforms_invalid")
+    return platforms
+
 class LocalLogin(BaseModel):
     email: str
     password: str
@@ -152,14 +158,15 @@ def health():
 
 @app.get("/shield/v1/health")
 def shield_health():
+    platforms = enabled_platforms()
     if os.getenv("SHIELD_API_AUTH_MODE") == "local":
         if len(os.getenv("SHIELD_LOCAL_JWT_SECRET","").encode("utf-8")) < 32:
             raise HTTPException(503,"local_jwt_secret_not_configured")
         if os.getenv("SHIELD_AUTHZ_MODE") != "local":
             raise HTTPException(503,"local_job_authorization_not_configured")
-    if os.getenv("SHIELD_ATTESTATION_MODE") == "production" and not os.getenv("SHIELD_APP_ID", "").strip():
+    if "ios" in platforms and os.getenv("SHIELD_ATTESTATION_MODE") == "production" and not os.getenv("SHIELD_APP_ID", "").strip():
         raise HTTPException(503,"apple_app_id_not_configured")
-    if os.getenv("SHIELD_PLAY_INTEGRITY_MODE") == "production":
+    if "android" in platforms and os.getenv("SHIELD_PLAY_INTEGRITY_MODE") == "production":
         if not os.getenv("SHIELD_PLAY_PACKAGE_NAME", "").strip():
             raise HTTPException(503,"play_package_not_configured")
         credentials=os.getenv("GOOGLE_PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON", "").strip()
@@ -221,6 +228,11 @@ async def capture(request:Request, job_id:str,
     account_id=actor.account_id
     try: authorization=authorize_job(account_id,job_id,point_id)
     except AuthorizationError as e: raise HTTPException(403,str(e))
+    platforms = enabled_platforms()
+    if play_integrity_token and "android" not in platforms:
+        raise HTTPException(422, "android_capture_disabled")
+    if attestation_assertion and "ios" not in platforms:
+        raise HTTPException(422, "ios_capture_disabled")
     if photo.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(415,"unsupported_photo_type")
     raw=await photo.read(MAX_PHOTO_BYTES + 1)
@@ -250,10 +262,6 @@ async def capture(request:Request, job_id:str,
     # token even when an Apple assertion is also present.
     if os.getenv("SHIELD_PLAY_INTEGRITY_MODE",att_mode) == "production" and play_integrity_token and play_result.get("trusted") is not True:
         raise HTTPException(422, "play_integrity_required")
-    try: store.consume(nonce,job_id,point_id,account_id)
-    except ValueError as e: raise HTTPException(409,str(e))
-    if att_result.get("trusted") is True and att.update_counter(attestation_key_id, att_result["counter"]) is False:
-        raise HTTPException(409,"attestation_counter_update_failed")
     # The uploader cannot choose the expected site coordinates. In standalone mode
     # they come from the administrator's job pin; integrations may supply them in
     # the trusted server-to-server authorization response.
@@ -267,22 +275,23 @@ async def capture(request:Request, job_id:str,
     location_result=evaluate_location(lat=lat,lng=lng,accuracy_m=accuracy_m,
       observed_at=location_observed_at,expected_lat=trusted_lat,expected_lng=trusted_lng,
       mock_flag=mock_flag)
-    verdict=location_result["verdict"]; reasons=location_result["reasons"]
+    if location_result["verdict"] == "reject":
+        raise HTTPException(422, {"code": "location_rejected", "reasons": location_result["reasons"]})
     eid=str(uuid.uuid4()); written=datetime.now(timezone.utc).isoformat()
     try: timestamp_result=timestamp_bind_hash(bh)
     except RuntimeError as e: raise HTTPException(503,str(e))
-    rel=store.save_original(eid,job_id,account_id,raw)
-    store.create_evidence(id=eid,job_id=job_id,point_id=point_id,account_id=account_id,nonce=nonce,
+    try:
+        store.accept_capture(raw, attestation_key_id=attestation_key_id,
+          attestation_counter=att_result["counter"] if att_result.get("trusted") is True else None,
+          amendment_of=amendment_of,
+          id=eid,job_id=job_id,point_id=point_id,account_id=account_id,nonce=nonce,
       photo_sha256=photo_sha,note_sha256=note_sha,bind_hash=bh,captured_at=captured_at,written_at=written,
       location_json=json.dumps({"lat":lat,"lng":lng,"accuracy_m":accuracy_m,"observed_at":location_observed_at,"expected_lat":trusted_lat,"expected_lng":trusted_lng,**location_result},sort_keys=True),
-      attestation_json=json.dumps({"apple":att_result,"play_integrity":play_result,"trusted_timestamp":timestamp_result},sort_keys=True),original_path=rel,status="sealed",state="sealed",actor_id=account_id,state_history=["capture_received","verified","sealed"])
-    if amendment_of:
-        parent=store.get(amendment_of)
-        if not parent or parent["account_id"]!=account_id: raise HTTPException(404,"amendment_parent_not_found")
-        if parent["state"]!="sealed": raise HTTPException(409,"amendment_parent_not_sealed")
-        store.link_evidence(amendment_of,eid,"amendment",written)
-        store.transition_state(amendment_of,"amended",account_id,{"child_evidence_id":eid})
-        store.append_custody_event(amendment_of,"amended",written,account_id,{"child_evidence_id":eid})
+      attestation_json=json.dumps({"apple":att_result,"play_integrity":play_result,"trusted_timestamp":timestamp_result},sort_keys=True),
+      attestation_sheet_json=sheet.canonical_bytes.decode("utf-8"),
+      status="sealed",state="sealed",actor_id=account_id,state_history=["capture_received","verified","sealed"])
+    except ValueError as e:
+        raise HTTPException(404 if str(e) == "amendment_parent_not_found" else 409, str(e)) from e
     return {"evidence_id":eid,"status":"sealed","photo_sha256":photo_sha,"note_sha256":note_sha,"bind_hash":bh,"written_at":written,"attestation_sheet":sheet.public_dict(),"location":location_result,"attestation":{"apple":att_result,"play_integrity":play_result},"trusted_timestamp":timestamp_result}
 
 @app.get("/shield/evidence/{evidence_id}/state")
@@ -294,6 +303,28 @@ def evidence_state(request:Request, evidence_id:str):
     history=[dict(r) for r in store.state_history(evidence_id)]
     return {"evidence_id":evidence_id,"state":row["state"],"status":row["status"],"history":history}
 
+@app.get("/shield/jobs/{job_id}/captures/by-nonce/{nonce}")
+def capture_receipt(request: Request, job_id: str, nonce: str):
+    """Resolve a lost capture response before retrying with a new nonce."""
+    actor = actor_for(request, None)
+    with store.db() as c:
+        row = c.execute("SELECT * FROM evidence WHERE job_id=? AND nonce=? AND account_id=?",
+                        (job_id, nonce, actor.account_id)).fetchone()
+    if not row:
+        raise HTTPException(404, "capture_receipt_not_found")
+    try: authorize_job(actor.account_id, job_id, row["point_id"])
+    except AuthorizationError as e: raise HTTPException(403, str(e)) from e
+    return {key: row[key] for key in ("id", "status", "photo_sha256", "note_sha256", "bind_hash", "written_at")} | {"evidence_id": row["id"]}
+
+@app.get("/shield/evidence/{evidence_id}/attestation-sheet")
+def evidence_testimony(request: Request, evidence_id: str):
+    actor = actor_for(request, None)
+    row = store.get(evidence_id)
+    if not row: raise HTTPException(404, "evidence_not_found")
+    if row["account_id"] != actor.account_id: raise HTTPException(403, "evidence_access_denied")
+    if not row["attestation_sheet_json"]: raise HTTPException(404, "legacy_testimony_not_retained")
+    return {"evidence_id": evidence_id, "attestation_sheet": json.loads(row["attestation_sheet_json"]), "note_sha256": row["note_sha256"]}
+
 @app.get("/shield/evidence/{evidence_id}/verify")
 def verify(request:Request, evidence_id:str):
     """Authenticated owner verification using the server-held original."""
@@ -302,8 +333,7 @@ def verify(request:Request, evidence_id:str):
     if not row: raise HTTPException(404,"evidence_not_found")
     if row["account_id"] != actor.account_id:
         raise HTTPException(403,"evidence_access_denied")
-    path=store.root/row["original_path"]
-    original=path.read_bytes() if path.exists() else None
+    original=store.read_original(row["original_path"])
     return verify_record(row, original, state_history=store.state_history(evidence_id), custody_events=store.custody_history(evidence_id))
 
 @app.post("/shield/v1/verify")
@@ -325,8 +355,7 @@ async def independent_verify(
         supplied=await photo.read(MAX_PHOTO_BYTES + 1)
         if len(supplied) > MAX_PHOTO_BYTES: raise HTTPException(413,"photo_too_large")
         if not supplied: raise HTTPException(400,"empty_photo")
-    path=store.root/row["original_path"]
-    original=path.read_bytes() if path.exists() else None
+    original=store.read_original(row["original_path"])
     return verify_record(row, original, supplied, location_stated, purpose,
         state_history=store.state_history(evidence_id), custody_events=store.custody_history(evidence_id))
 
@@ -353,9 +382,8 @@ def void_evidence(request:Request,evidence_id:str,body:EvidenceAction):
     if row["account_id"]!=actor.account_id: raise HTTPException(403,"evidence_access_denied")
     reason=body.reason.strip()
     if not reason: raise HTTPException(422,"reason_required")
-    try: store.transition_state(evidence_id,"voided",actor.account_id,{"reason":reason})
+    try: store.void(evidence_id,actor.account_id,reason)
     except ValueError as e: raise HTTPException(409,str(e))
-    now=datetime.now(timezone.utc).isoformat(); store.append_custody_event(evidence_id,"voided",now,actor.account_id,{"reason":reason})
     return {"evidence_id":evidence_id,"state":"voided","original_preserved":True}
 
 @app.get("/shield/admin/health")

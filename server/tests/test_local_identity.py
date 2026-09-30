@@ -114,6 +114,7 @@ def test_location_pin_is_admin_owned_and_upload_cannot_override_it(monkeypatch,t
     created=client.post('/shield/admin/accounts',json={'email':'worker@example.com','password':'worker-password-123'},headers=admin_header)
     worker_id=created.json()['account_id']
     worker_header={'Authorization':'Bearer '+login(client,'worker@example.com','worker-password-123').json()['access_token']}
+    main.store.save_attestation_key('key', worker_id, 'test-only-key', 'production', '')
     job={'account_id':worker_id,'job_id':'location-job','point_id':'p1'}
     assert client.post('/shield/admin/job-grants',json=job,headers=admin_header).status_code==200
 

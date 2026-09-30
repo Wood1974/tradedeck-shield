@@ -23,6 +23,7 @@ def test_production_apple_capture_does_not_require_play_token(monkeypatch):
     monkeypatch.setenv('SHIELD_PLAY_INTEGRITY_MODE', 'production')
     monkeypatch.setattr(main.att, 'verify_assertion', lambda *args, **kwargs: {'trusted': True, 'status': 'verified', 'counter': 1})
     monkeypatch.setattr(main.att, 'update_counter', lambda *args, **kwargs: True)
+    main.store.save_attestation_key('apple-key', 'apple-account', 'test-only-key', 'production', '')
     c = TestClient(app)
     challenge = c.post('/shield/jobs/apple-job/challenge', data={'point_id': 'apple-point', 'account_id': 'apple-account'})
     assert challenge.status_code == 200

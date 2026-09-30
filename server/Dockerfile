@@ -4,6 +4,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
+COPY static ./static
 RUN useradd -r shield && mkdir -p /data/storage && chown -R shield:shield /data
 USER shield
 ENV SHIELD_DATABASE_URL=sqlite:////data/shield.db SHIELD_STORAGE_ROOT=/data/storage \

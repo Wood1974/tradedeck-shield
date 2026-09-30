@@ -1,24 +1,71 @@
-# Handoff status — September 27, 2026
+# Handoff status — September 30, 2026
 
-This source package is prepared for review; it is not live on Render. The existing `Tradedeck-api` Render service still runs the root Flask application from its September 21 commit. Deploy Shield as a separate FastAPI service after the gates below.
+This change starts from GitHub branch `fix/authoritative-capture-location` at
+`c28465293d0420cc1c6160b63071496a0d75c355`, newer than main and the original bundle.
+Its trusted job pins, shutter location snapshots, camera interruption guards and
+signed IPA selection are preserved.
 
-## Validated in this package
+## Validated and implemented
 
-- Pinned the missing `requests` dependency required by `google.auth.transport.requests`.
-- Updated the capture test for the required Section 9 attestation sheet and authenticated verification route.
-- Corrected the Play Integrity test fixture so an empty device verdict stays empty.
-- Allowed a valid Apple App Attest assertion without an Android Play token in production; a supplied invalid Play token is rejected.
-- Server suite: 55 passed on Python 3.12, including backup integrity and restore tests. Android and iOS compile jobs are present in GitHub Actions, but neither native build nor Docker deployment was verified in this Linux environment. The iOS Release App Attest entitlement is configured for production; owner signing credentials are still required.
+- Baseline CI run `36528311417` succeeded on September 29. It validated the baseline
+  server and unsigned native builds, not these edits or physical-device capture.
+- New server regressions cover custody/hash damage, illegal state history,
+  testimony changes/deletion, path traversal/symlink escape, exclusive originals,
+  rollback, concurrent replay, amendments, voids, owner-only receipts, iOS-only
+  readiness, location rejection and backup/restore of testimony/custody.
+- Canonical human testimony is now retained. Migration preserves older evidence;
+  old text cannot be recovered from its hash and is explicitly unavailable. New
+  evidence fails verification if its retained text is missing or altered.
+- Nonce, Apple counter, evidence/state/custody and amendment links commit together.
+  Originals are created exclusively and fsynced first. Normal failures remove the
+  new file. A process crash can leave an unreferenced original for inspection.
+- Both Dockerfiles include the verifier page. CI builds both contexts and tests
+  the packaged viewer, strict readiness and authentication.
+- The Blueprint selects an iOS-only production launch, paid Starter and a 10 GB
+  persistent disk. Disabled Android tokens are rejected; Google credentials are
+  unnecessary for iOS-only readiness. No development attestation bypass is used.
+- iPhone sealing renews an unused expiring challenge after device registration.
+  It checks the original nonce receipt before retrying; an uncertain upload does
+  not automatically create a second record.
 
-## Gates before deployment
+## Remaining gates, in order
 
-1. Import the included Git bundle to a new repository with a writable remote and run its CI. The preparation session has a local Git commit and bundle, but its GitHub integration reports zero installed accounts, so no remote was created or pushed.
-2. Standalone mode now has Shield-owned local accounts and exact job/point grants. Provision the first administrator on the service, create capturers, and test that a user without a grant is denied. Keep `SHIELD_API_AUTH_MODE=local` and `SHIELD_AUTHZ_MODE=local`; never use development mode in production.
-3. Configure Render secrets marked `sync: false` in `render.yaml`, physical-device Apple and Play credentials, and production API base URLs. Test that iOS and Android each pass their own attestation path. The mobile source was wired for local sign-in, but native compilation and real-device testing were unavailable here.
-   The Blueprint explicitly selects the paid Starter plan because persistent disks cannot attach to a Free web service. Review the resulting charges before applying it.
-4. In standalone mode the server uses SQLite and files on its persistent disk; the bundled Supabase migrations are historical alternatives and are not used or applied. Back up and restore the database and originals together. Do not apply the package's two differing Supabase evidence schemas to the TradeDeck project.
-5. Run CI, test authorization denial, replay, damaged originals, independent verification, backup and restore, and only then enable a public rollout.
+1. Pass updated server, Docker and native CI; review and merge the fixes before
+   deploying the Blueprint. Baseline CI does not validate changed code.
+2. Confirm the intended Render workspace; configure a single-instance paid service,
+   persistent disk, production secrets, HTTPS URL and strict readiness. Deployment
+   and production disk restore have not been established by this document.
+3. Provision the first admin interactively from the server shell. Create a capturer,
+   grant exact job/point access, set the job pin and test denial. Keep passwords
+   out of source and logs.
+4. Stop writes for consistent database/original backups; copy archives off disk
+   to private storage and perform an empty-target production restore drill before
+   collecting real evidence.
+5. Repair Apple signing prerequisites. TestFlight run `36528039367` failed at the
+   credential preflight: `IOS_DISTRIBUTION_CERTIFICATE_BASE64` was unavailable in
+   that run. Archive/export/upload were skipped. This is historical evidence,
+   not a current secret inventory. Recheck all four secrets, certificate identity,
+   matching App Store profile, production App Attest entitlement and ASC access.
+6. Upload with a fresh build number; install through TestFlight on a supported
+   physical iPhone. Test login, denial, capture, testimony, production App Attest,
+   sealing, originals, interruption, expiry and lost-response recovery against
+   the deployed server.
+7. Repeat denial, concurrent replay, oversized uploads, original/testimony/custody
+   corruption, amendment, void and independent-verification tests on production.
+   Supply store privacy/disclosure/support information and incident contacts.
+8. Enable Android only after credentials, signing and Play-distributed physical
+   tests pass. Set `SHIELD_ENABLED_PLATFORMS=ios,android` and recheck readiness.
 
-An offline backup/restore tool and tests are included. This is not proof of a Render disk restore; the live disk and offsite copy still need a restore drill.
+## Trust and recovery limits
 
-The disk-backed SQLite service is single-instance. Set up backup and restore before collecting real evidence.
+API append-only behavior and chained hashes do not prevent a server administrator
+from rewriting files/records and recomputing hashes. Immutable storage or external
+anchoring remains necessary before claiming evidence cannot be altered. The
+optional timestamp gateway stores its returned token; the independent verifier
+does not yet validate its signer or imprint.
+
+Mobile recovery is session-only. There is no durable offline queue or receipt
+journal across app termination/background discard. Do not promise complete offline
+recovery. SQLite is single-instance; replace the store before scaling replicas.
+Historical Supabase schemas are unused in standalone mode and must not be applied
+to TradeDeck.

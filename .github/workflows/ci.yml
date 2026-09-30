@@ -25,6 +25,21 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build both supported Docker contexts
+        run: |
+          docker build -t shield-root .
+          docker build -t shield-server server
+      - name: Check packaged viewer and production readiness
+        run: |
+          for image in shield-root shield-server; do
+            docker run --rm -e SHIELD_ENABLED_PLATFORMS=ios \
+              -e SHIELD_APP_ID=766457AWH4.com.tradedeck.shield \
+              -e SHIELD_LOCAL_JWT_SECRET=ci-only-test-secret-at-least-32-bytes \
+              "$image" python -c 'from fastapi.testclient import TestClient; from app.main import app; c=TestClient(app); assert c.get("/verify").status_code == 200; assert c.get("/shield/v1/health").status_code == 200; assert c.get("/shield/auth/me").status_code == 401'
   ios:
     runs-on: macos-latest
     steps:

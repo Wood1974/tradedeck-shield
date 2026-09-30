@@ -10,4 +10,12 @@
 - Android release keystore and Play App Signing configured
 - Privacy policy, camera/location disclosures, support URL supplied in stores
 - CI full suite green with all pinned dependencies
+- Both Docker contexts built; packaged viewer/readiness/authentication checks green
+- Stored testimony change/deletion and full custody-chain damage fail verification
+- iOS-only launch disables Android capture without development attestation
+- Concurrent replay and failed-write rollback tested on the deployment
+- TestFlight signing preflight passes; prior missing certificate secret resolved
+- Physical iPhone expiry, interruption and lost-response recovery tested
+- Immutable storage or external anchoring established before claiming evidence cannot be altered
+- Durable offline recovery implemented and tested before promising offline operation
 - Restore drill and incident contacts documented

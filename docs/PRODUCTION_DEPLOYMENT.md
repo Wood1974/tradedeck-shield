@@ -8,10 +8,34 @@ Standalone mode uses `SHIELD_API_AUTH_MODE=local`, `SHIELD_AUTHZ_MODE=local`, an
 After creating the service and setting secrets, provision the first administrator from the server shell with `cd /app && python -m app.local_identity create-admin --email owner@example.com`. The command prompts for a 12+ character password. An administrator signs in with `POST /shield/auth/login`, creates capturer accounts via `POST /shield/admin/accounts`, and grants each allowed job and point via `POST /shield/admin/job-grants`. Capturers cannot self-register or assign themselves work. Before location comparison can report `consistent`, the administrator must set each job's expected pin with `PUT /shield/admin/job-locations` and JSON `{"job_id":"...","latitude":40.5,"longitude":-111.9}`. This pin is stored on the same backed-up disk. A job without a pin is flagged `expected_location_missing`. Client-supplied expected coordinates are ignored; external TradeDeck integration may return expected coordinates only through the authenticated server-to-server authorization response. `DELETE /shield/admin/job-grants` revokes a job point; `POST /shield/admin/accounts/{account_id}/deactivate` invalidates an account and its tokens. `POST /shield/admin/accounts/{account_id}/reset-password` revokes old tokens; a locked-out administrator can run `python -m app.local_identity reset-password --email owner@example.com` from the server shell. Do not put passwords or access tokens into source files or logs.
 
 ## iOS
+
+The supplied Blueprint initially enables only iOS with `SHIELD_ENABLED_PLATFORMS=ios`.
+Keep both attestation modes at `production`; Android captures are disabled, so the
+readiness check does not require a Google service account. Change to `ios,android`
+only after adding valid Google credentials and completing Play device testing.
+Render uses `/shield/v1/health`; `/health` is only a liveness response.
 Open `ios/ShieldCamera/ShieldCamera.xcodeproj`, set the production bundle/team and HTTPS API URL, and archive with the owner's distribution certificate and provisioning profile. The Debug configuration uses the development App Attest entitlement; Release uses `ShieldCameraProduction.entitlements` with the production environment. Match `SHIELD_APP_ID` to the signing team's ID and bundle identifier. The app signs into Shield and keeps the access token in memory for that session. No gallery entitlement or picker is used. Validate the Swift build and a physical-device production assertion before release. The app submits the Core Location fix timestamp and an OS simulation signal when present. A stale or missing fix is flagged, not silently treated as proof of site presence.
 
 ## Android
 Set the production application ID/signing config, `SHIELD_CLOUD_PROJECT_NUMBER`, production API base URL, Play Integrity linkage, release keystore, and build an AAB. The repository does not contain a signing key; keep it and its passwords outside Git. Publish through Play Console internal testing before production. Validate the Kotlin build, login, grant denial, challenge, Play token, and seal on a Play-distributed device. The app samples the newest OS last-known GPS/network fix when the shutter completes, including its time and mock-provider signal. Missing or stale fixes are flagged; a future enhancement should request a fresh fix at shutter time.
 
 ## Operational gates
+
+New captures persist canonical human testimony in SQLite. The authenticated
+`GET /shield/evidence/{id}/attestation-sheet` route retrieves it. Records migrated
+from earlier versions retain their hashes but cannot recover missing text.
+`GET /shield/jobs/{job}/captures/by-nonce/{nonce}` returns an owner's receipt after
+a lost upload response. iPhone recovery is session-only; durable offline recovery
+is still required before promising offline operation.
+
+Capture identifiers must be 1–128 ASCII letters/digits/dot/underscore/hyphen and
+begin with a letter or digit. Unsafe filesystem identifiers are rejected.
+Location `reject` stops sealing before consuming the nonce; `flag` is retained on
+sealed evidence. Missing location remains a flag, never GPS verification.
+
+Sealing and amendments use one SQLite write transaction and write/fsync the original
+first. Normal failed transactions remove their new original. After an unclean stop,
+inspect unreferenced files before cleanup; do not delete evidence automatically.
+Stop writes before backing up the database and originals. An actual Render restore
+remains mandatory even when local backup tests pass.
 Before public release: verify Apple App Attest on physical production-signed devices; verify Play Integrity from Play-distributed builds; run the complete test suite in CI; configure backups for `/data`; exercise restore; configure alerting; test nonce replay, authz denial, oversized uploads, corrupted originals, custody-chain tampering, voids, and independent verification.

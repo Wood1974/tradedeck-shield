@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var purpose = ""
     @State private var camera = false
     @State private var busy = false
+    @State private var uploadOutcomeUnknown = false
     @State private var result = ""
 
     var body: some View {
@@ -46,7 +47,9 @@ struct ContentView: View {
                         if photo != nil {
                             Text("Required attestation").font(.headline)
                             TextField("Where is this / location or context", text: $locationStated, axis: .vertical).textFieldStyle(.roundedBorder)
+                                .disabled(busy || uploadOutcomeUnknown)
                             TextField("Why are you taking this photo / what does it document", text: $purpose, axis: .vertical).textFieldStyle(.roundedBorder)
+                                .disabled(busy || uploadOutcomeUnknown)
                             Text("These are your statements. Shield does not fill them from GPS or job data.")
                                 .font(.caption).foregroundStyle(.secondary)
                             Button("Seal photo and attestation") { Task { await seal() } }
@@ -90,6 +93,7 @@ struct ContentView: View {
         challenge = nil
         locationStated = ""
         purpose = ""
+        uploadOutcomeUnknown = false
     }
 
     private func signIn() async {
@@ -113,28 +117,51 @@ struct ContentView: View {
     }
 
     private func seal() async {
-        guard let photo, let photoCapturedAt, let challenge else { return }
+        guard let photo, let photoCapturedAt, var activeChallenge = challenge else { return }
         busy = true; defer { busy = false }
         do {
+            let client = try api()
+            // An earlier upload may have committed even if its response was lost.
+            if let receipt = try await client.receipt(jobID: state.jobID, nonce: activeChallenge.nonce) {
+                discardCapture()
+                result = "Already sealed\nEvidence ID: \(receipt.evidence_id)\nBind: \(receipt.bind_hash)"
+                return
+            }
+            if uploadOutcomeUnknown {
+                result = "Upload outcome is not confirmed. Tap Seal again to check for its receipt before starting another capture."
+                return
+            }
+            try await attest.ensureAttested(accountID: state.accountID, api: client)
+            guard self.challenge?.nonce == activeChallenge.nonce, self.photo != nil else { return }
+            if activeChallenge.expires_at < Date().timeIntervalSince1970 + 30 {
+                let renewed = try await client.challenge(jobID: state.jobID, pointID: state.pointID, accountID: state.accountID)
+                guard self.challenge?.nonce == activeChallenge.nonce, self.photo != nil else { return }
+                activeChallenge = renewed
+                self.challenge = renewed
+            }
             let photoHash = sha256Hex(photo)
             let noteHash = sha256Hex(canonicalNote(locationStated: locationStated, purpose: purpose))
             let bind = bindHash(photo: photoHash, note: noteHash, job: state.jobID,
-                                point: state.pointID, nonce: challenge.nonce, account: state.accountID)
-            let client = try api()
-            try await attest.ensureAttested(accountID: state.accountID, api: client)
+                                point: state.pointID, nonce: activeChallenge.nonce, account: state.accountID)
             let assertion = try await attest.assertion(accountID: state.accountID,
                                                        clientDataHash: Data(SHA256.hash(data: Data(bind.utf8))))
             let fix = capturedLocation
             let position = fix.map { ($0.coordinate.latitude, $0.coordinate.longitude, $0.horizontalAccuracy) }
             let observedAt = fix.map { ISO8601DateFormatter().string(from: $0.timestamp) }
             let simulated = fix?.sourceInformation?.isSimulatedBySoftware == true ? true : nil
-            guard self.challenge?.nonce == challenge.nonce, self.photo != nil else { return }
-            let response = try await client.capture(jobID: state.jobID, challenge: challenge, accountID: state.accountID,
+            guard self.challenge?.nonce == activeChallenge.nonce, self.photo != nil else { return }
+            uploadOutcomeUnknown = true
+            let response = try await client.capture(jobID: state.jobID, challenge: activeChallenge, accountID: state.accountID,
                                                     photo: photo, locationStated: locationStated, purpose: purpose,
                                                     capturedAt: ISO8601DateFormatter().string(from: photoCapturedAt),
                                                     location: position, locationObservedAt: observedAt, mockFlag: simulated, attestation: assertion)
             discardCapture()
             result = "SEALED\nEvidence ID: \(response.evidence_id)\nBind: \(response.bind_hash)\nServer time: \(response.written_at)"
-        } catch { result = "Seal failed: \(error)" }
+        } catch {
+            if let response = error as? ShieldHTTPError, (400..<500).contains(response.status) {
+                uploadOutcomeUnknown = false
+            }
+            result = "Seal failed: \(error). Keep this capture open and tap Seal again to check or retry."
+        }
     }
 }
