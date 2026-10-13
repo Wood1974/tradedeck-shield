@@ -177,6 +177,24 @@ class LocalIdentity:
             raise ValueError("account_not_found")
 
 
+def ensure_bootstrap_admin() -> bool:
+    """Create the first administrator from SHIELD_BOOTSTRAP_ADMIN_EMAIL / _PASSWORD when no admin exists yet.
+
+    This is how the first account is made on a host with no shell. It does nothing once any admin exists, so the two
+    variables can (and should) be removed from the environment afterwards. Returns True if an account was created.
+    """
+    email = os.getenv("SHIELD_BOOTSTRAP_ADMIN_EMAIL", "").strip()
+    password = os.getenv("SHIELD_BOOTSTRAP_ADMIN_PASSWORD", "")
+    if not email or not password:
+        return False
+    local = identity()
+    with local.db() as db:
+        if db.execute("SELECT 1 FROM local_accounts WHERE role='admin' LIMIT 1").fetchone():
+            return False
+    local.create_account(email, password, "admin")
+    return True
+
+
 def identity() -> LocalIdentity:
     return LocalIdentity(os.getenv("SHIELD_DATABASE_URL","sqlite:///./shield.db"))
 

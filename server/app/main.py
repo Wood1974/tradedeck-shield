@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone
-import json, os, uuid
+import json, logging, os, uuid
 from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import FileResponse
@@ -18,6 +18,8 @@ from .timestamping import timestamp_bind_hash
 from .custody_chain import verify_chain
 from .capture_packs import PACKS
 from .security import enforce_rate_limit
+from .identity_api import router as identity_router
+from fastapi.middleware.cors import CORSMiddleware
 
 app=FastAPI(title="TradeDeck Shield Evidence API", version="2.0.0", docs_url="/docs" if os.getenv("SHIELD_ENABLE_DOCS","false").lower()=="true" else None, redoc_url=None)
 MAX_PHOTO_BYTES=int(os.getenv("SHIELD_MAX_PHOTO_BYTES","15728640"))
@@ -27,6 +29,22 @@ att_mode=os.getenv("SHIELD_ATTESTATION_MODE","development")
 att=AttestationVerifier(att_mode,os.getenv("SHIELD_APP_ID",""),store=store)
 play=PlayIntegrityVerifier(os.getenv("SHIELD_PLAY_INTEGRITY_MODE",att_mode),os.getenv("SHIELD_PLAY_PACKAGE_NAME", "com.tradedeck.shield"))
 TTL=int(os.getenv("SHIELD_CHALLENGE_TTL_SECONDS","120"))
+app.include_router(identity_router)
+# The phone app's web view calls this API from its own origin (iOS capacitor://localhost, Android https://localhost).
+# Without these the browser blocks the request at the preflight. Bearer tokens, not cookies, so no credentials mode.
+app.add_middleware(CORSMiddleware,
+    allow_origins=[o.strip() for o in os.getenv("SHIELD_CORS_ORIGINS","capacitor://localhost,https://localhost").split(",") if o.strip()],
+    allow_methods=["GET","POST","OPTIONS"], allow_headers=["Authorization","Content-Type"], max_age=600)
+
+@app.on_event("startup")
+def _bootstrap_first_admin():
+    # A host with no shell has no other way to make the first account. Does nothing once any admin exists.
+    if os.getenv("SHIELD_API_AUTH_MODE","development") == "local":
+        from .local_identity import ensure_bootstrap_admin
+        try:
+            if ensure_bootstrap_admin(): logging.getLogger(__name__).warning("Created the first Shield administrator from the bootstrap variables; remove them now")
+        except (ValueError, RuntimeError):
+            logging.getLogger(__name__).exception("Bootstrap administrator could not be created")
 
 class LocalLogin(BaseModel):
     email: str
