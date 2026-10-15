@@ -68,6 +68,8 @@ def local_admin(request:Request):
     if actor.claims.get("role") != "admin":
         raise HTTPException(403,"admin_required")
     from .local_identity import LocalAccount, identity
+    if identity().is_locked():
+        raise HTTPException(403,"admin_locked")
     return identity(),LocalAccount(actor.account_id,"", "admin")
 
 @app.post("/shield/auth/login")
@@ -358,6 +360,8 @@ def void_evidence(request:Request,evidence_id:str,body:EvidenceAction):
 
 @app.get("/shield/admin/health")
 def admin_health(request:Request):
+    from .local_identity import admin_locked
+    if admin_locked(): raise HTTPException(403,"admin_locked")
     actor=actor_for(request,None)
     if os.getenv("SHIELD_API_AUTH_MODE","development") == "local":
         if actor.claims.get("role") != "admin": raise HTTPException(403,"admin_required")

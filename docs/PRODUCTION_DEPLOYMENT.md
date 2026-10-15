@@ -7,6 +7,15 @@ Standalone mode uses `SHIELD_API_AUTH_MODE=local`, `SHIELD_AUTHZ_MODE=local`, an
 
 After creating the service and setting secrets, provision the first administrator from the server shell with `cd /app && python -m app.local_identity create-admin --email owner@example.com`. The command prompts for a 12+ character password. An administrator signs in with `POST /shield/auth/login`, creates capturer accounts via `POST /shield/admin/accounts`, and grants each allowed job and point via `POST /shield/admin/job-grants`. Capturers cannot self-register or assign themselves work. `DELETE /shield/admin/job-grants` revokes a job point; `POST /shield/admin/accounts/{account_id}/deactivate` invalidates an account and its tokens. `POST /shield/admin/accounts/{account_id}/reset-password` revokes old tokens; a locked-out administrator can run `python -m app.local_identity reset-password --email owner@example.com` from the server shell. Do not put passwords or access tokens into source files or logs.
 
+## Launch: turn administrator access off for good
+Administrator access is for setup only. Before launch, create every capturer account and grant its jobs. At launch, run once from the server shell:
+
+`cd /app && python -m app.local_identity lock-admin`
+
+It asks you to type `LOCK`. It then disables every administrator account and revokes their tokens, writes a permanent lock row to the database, and from then on: every `/shield/admin/*` route returns 403, no administrator can sign in, be created, or have a password reset, and `SHIELD_BOOTSTRAP_ADMIN_*` does nothing. Capturer accounts keep working. Deleting `SHIELD_ADMIN_LOCKED` from the environment does not undo it; only the database row counts once written. There is no self sign-up, so no accounts can be added after the lock.
+
+This stops the app, the API and every login from reaching administrator functions. Whoever owns the hosting account can still read the server's disk, so lock that account down separately.
+
 ## iOS
 Open `ios/ShieldCamera/ShieldCamera.xcodeproj`, set the production bundle/team and HTTPS API URL, and archive with the owner's distribution certificate and provisioning profile. The Debug configuration uses the development App Attest entitlement; Release uses `ShieldCameraProduction.entitlements` with the production environment. Match `SHIELD_APP_ID` to the signing team's ID and bundle identifier. The app signs into Shield and keeps the access token in memory for that session. No gallery entitlement or picker is used. Validate the Swift build and a physical-device production assertion before release.
 

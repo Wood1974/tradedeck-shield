@@ -54,6 +54,9 @@ class LocalIdentity:
                 auth_version INTEGER NOT NULL DEFAULT 1,
                 created_at REAL NOT NULL
               );
+              CREATE TABLE IF NOT EXISTS launch_lock (
+                id INTEGER PRIMARY KEY CHECK (id = 1), locked_at REAL NOT NULL
+              );
               CREATE TABLE IF NOT EXISTS local_job_grants (
                 account_id TEXT NOT NULL REFERENCES local_accounts(id),
                 job_id TEXT NOT NULL, point_id TEXT NOT NULL,
@@ -67,6 +70,24 @@ class LocalIdentity:
     def _digest(password: str, salt: bytes) -> str:
         return hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1).hex()
 
+    def is_locked(self) -> bool:
+        """True once administrator access has been turned off. The database row is what makes it permanent:
+        removing SHIELD_ADMIN_LOCKED from the environment does not undo a lock that has been written."""
+        if os.getenv("SHIELD_ADMIN_LOCKED", "").strip().lower() in {"1", "true", "yes"}:
+            return True
+        with self.db() as db:
+            return db.execute("SELECT 1 FROM launch_lock WHERE id=1").fetchone() is not None
+
+    def lock_admin(self) -> int:
+        """Turn administrator access off for good. Returns how many administrator accounts were switched off.
+
+        Every administrator is deactivated and its tokens revoked, and a lock row is written so that no administrator
+        can be created, sign in, or have a password reset afterwards."""
+        with self.db() as db:
+            changed = db.execute("UPDATE local_accounts SET active=0,auth_version=auth_version+1 WHERE role='admin'").rowcount
+            db.execute("INSERT OR IGNORE INTO launch_lock(id,locked_at) VALUES(1,?)", (time.time(),))
+        return changed
+
     def create_account(self, email: str, password: str, role: str = "capturer") -> LocalAccount:
         email = email.strip().lower()
         if not email or "@" not in email or len(email) > 254:
@@ -75,6 +96,8 @@ class LocalIdentity:
             raise ValueError("password_length_invalid")
         if role not in {"admin", "capturer"}:
             raise ValueError("invalid_role")
+        if role == "admin" and self.is_locked():
+            raise ValueError("admin_locked")
         salt = secrets.token_bytes(16)
         account = LocalAccount(str(uuid.uuid4()), email, role)
         try:
@@ -93,6 +116,8 @@ class LocalIdentity:
         expected = row["password_hash"] if row else "0" * 64
         valid = hmac.compare_digest(self._digest(password, salt), expected)
         if not row or not valid or not row["active"]:
+            return None
+        if row["role"] == "admin" and self.is_locked():
             return None
         return LocalAccount(row["id"], row["email"], row["role"])
 
@@ -121,6 +146,8 @@ class LocalIdentity:
                              (claims["sub"],)).fetchone()
         if not row or not row["active"] or claims["ver"] != row["auth_version"]:
             raise ValueError("account_inactive_or_revoked")
+        if row["role"] == "admin" and self.is_locked():
+            raise ValueError("admin_locked")
         return LocalAccount(row["id"],row["email"],row["role"])
 
     def grant(self, actor: LocalAccount, account_id: str, job_id: str, point_id: str):
@@ -170,6 +197,9 @@ class LocalIdentity:
             raise ValueError("password_length_invalid")
         salt = secrets.token_bytes(16)
         with self.db() as db:
+            target = db.execute("SELECT role FROM local_accounts WHERE id=?", (account_id,)).fetchone()
+            if target and target["role"] == "admin" and self.is_locked():
+                raise ValueError("admin_locked")
             changed = db.execute("""UPDATE local_accounts SET password_salt=?,password_hash=?,auth_version=auth_version+1
                                      WHERE id=? AND active=1""",
                                  (salt.hex(),self._digest(password,salt),account_id)).rowcount
@@ -188,6 +218,8 @@ def ensure_bootstrap_admin() -> bool:
     if not email or not password:
         return False
     local = identity()
+    if local.is_locked():
+        return False
     with local.db() as db:
         if db.execute("SELECT 1 FROM local_accounts WHERE role='admin' LIMIT 1").fetchone():
             return False
@@ -195,28 +227,48 @@ def ensure_bootstrap_admin() -> bool:
     return True
 
 
+def admin_locked() -> bool:
+    """Whether administrator access is turned off, for code paths that do not hold a LocalIdentity."""
+    try:
+        return identity().is_locked()
+    except ValueError:
+        # Not a SQLite deployment: only the environment flag can say.
+        return os.getenv("SHIELD_ADMIN_LOCKED", "").strip().lower() in {"1", "true", "yes"}
+
+
 def identity() -> LocalIdentity:
     return LocalIdentity(os.getenv("SHIELD_DATABASE_URL","sqlite:///./shield.db"))
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Provision the first Shield administrator on the server")
-    parser.add_argument("action", choices=["create-admin","reset-password"])
-    parser.add_argument("--email",required=True)
+    parser = argparse.ArgumentParser(description="Provision the first Shield administrator on the server, or turn administrator access off for good")
+    parser.add_argument("action", choices=["create-admin","reset-password","lock-admin"])
+    parser.add_argument("--email")
     args = parser.parse_args()
+    if args.action == "lock-admin":
+        print("This turns administrator access off permanently: every administrator account is disabled, no new one can be")
+        print("created, and nobody can list accounts or add capturers afterwards. Capturer accounts keep working.")
+        if input("Type LOCK to continue: ").strip() != "LOCK":
+            parser.error("not confirmed; nothing changed")
+        print("Administrator accounts switched off:", identity().lock_admin())
+        return
+    if not args.email:
+        parser.error("--email is required")
     password = getpass.getpass("New Shield administrator password (12+ characters): ")
     confirm = getpass.getpass("Confirm password: ")
     if password != confirm:
         parser.error("passwords do not match")
     local = identity()
     if args.action == "create-admin":
-        account = local.create_account(args.email,password,"admin")
+        try: account = local.create_account(args.email,password,"admin")
+        except ValueError as exc: parser.error(str(exc))
         print("Created Shield administrator:",account.id)
     else:
         with local.db() as db:
             row = db.execute("SELECT id FROM local_accounts WHERE email=?",(args.email.strip().lower(),)).fetchone()
         if not row: parser.error("account not found")
-        local.reset_password(row["id"],password)
+        try: local.reset_password(row["id"],password)
+        except ValueError as exc: parser.error(str(exc))
         print("Password reset; existing tokens revoked")
 
 
