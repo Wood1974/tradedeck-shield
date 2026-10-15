@@ -97,3 +97,63 @@ def test_production_health_requires_platform_configuration(monkeypatch,tmp_path)
     monkeypatch.setenv('GOOGLE_PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON',
                        '{"client_email":"test@example.com","private_key":"test","token_uri":"https://example.com"}')
     assert client.get('/shield/v1/health').status_code==200
+
+
+def _admin_header(client):
+    token = login(client, 'admin@example.com', 'admin-password-123').json()['access_token']
+    return {'Authorization': 'Bearer ' + token}
+
+
+def test_lock_admin_turns_admin_access_off_for_good(monkeypatch, tmp_path):
+    local, admin, client = setup_local(monkeypatch, tmp_path)
+    admin_header = _admin_header(client)
+    created = client.post('/shield/admin/accounts', json={'email': 'worker@example.com', 'password': 'worker-password-123'}, headers=admin_header)
+    assert created.status_code == 200
+    assert not local.is_locked()
+
+    assert local.lock_admin() == 1
+    assert local.is_locked()
+
+    # Every admin route is closed, the admin token that was live a moment ago is dead, and the admin cannot sign in again.
+    assert client.get('/shield/admin/health', headers=admin_header).status_code == 403
+    assert client.post('/shield/admin/accounts', json={'email': 'x@example.com', 'password': 'x-password-12345'}, headers=admin_header).status_code in {401, 403}
+    assert client.get('/shield/auth/me', headers=admin_header).status_code == 401
+    assert login(client, 'admin@example.com', 'admin-password-123').status_code == 401
+    # No admin can be made or revived any way the server offers.
+    for call in (lambda: local.create_account('second@example.com', 'second-password-123', 'admin'),
+                 lambda: local.reset_password(admin.id, 'brand-new-password-123')):
+        try:
+            call()
+            raise AssertionError('expected admin_locked')
+        except ValueError as exc:
+            assert str(exc) in {'admin_locked', 'account_not_found'}
+    # Capturer accounts keep working.
+    worker = login(client, 'worker@example.com', 'worker-password-123')
+    assert worker.status_code == 200
+    worker_header = {'Authorization': 'Bearer ' + worker.json()['access_token']}
+    assert client.get('/shield/jobs', headers=worker_header).status_code == 200
+    assert client.get('/shield/admin/health', headers=worker_header).status_code == 403
+
+
+def test_lock_survives_removing_the_environment_flag(monkeypatch, tmp_path):
+    local, admin, client = setup_local(monkeypatch, tmp_path)
+    monkeypatch.setenv('SHIELD_ADMIN_LOCKED', 'true')
+    assert local.is_locked()
+    assert login(client, 'admin@example.com', 'admin-password-123').status_code == 401
+    monkeypatch.delenv('SHIELD_ADMIN_LOCKED')
+    # Only the env flag was used so far: nothing permanent is written, so removing it reopens access.
+    assert login(client, 'admin@example.com', 'admin-password-123').status_code == 200
+    local.lock_admin()
+    monkeypatch.delenv('SHIELD_ADMIN_LOCKED', raising=False)
+    assert login(client, 'admin@example.com', 'admin-password-123').status_code == 401
+
+
+def test_bootstrap_admin_does_nothing_once_locked(monkeypatch, tmp_path):
+    from app.local_identity import ensure_bootstrap_admin
+    path = f"sqlite:///{tmp_path / 'fresh.db'}"
+    monkeypatch.setenv('SHIELD_DATABASE_URL', path)
+    monkeypatch.setenv('SHIELD_BOOTSTRAP_ADMIN_EMAIL', 'first@example.com')
+    monkeypatch.setenv('SHIELD_BOOTSTRAP_ADMIN_PASSWORD', 'first-password-123')
+    LocalIdentity(path).lock_admin()
+    assert ensure_bootstrap_admin() is False
+    assert LocalIdentity(path).authenticate('first@example.com', 'first-password-123') is None
