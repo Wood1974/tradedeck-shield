@@ -85,6 +85,43 @@ def local_login(body:LocalLogin):
     return {"access_token":token,"token_type":"bearer","expires_in":TOKEN_TTL_SECONDS,
             "account_id":account.id,"role":account.role}
 
+class ForgotPassword(BaseModel):
+    email: str
+
+class ResetPassword(BaseModel):
+    email: str
+    code: str
+    new_password: str
+
+@app.post("/shield/auth/forgot")
+def local_forgot_password(body:ForgotPassword):
+    if os.getenv("SHIELD_API_AUTH_MODE", "development") != "local":
+        raise HTTPException(404,"local_identity_disabled")
+    from . import password_reset
+    from .local_identity import identity
+    try:
+        password_reset.request_code(identity(),body.email)
+    except password_reset.MailNotConfigured as exc:
+        raise HTTPException(503,"email_not_configured") from exc
+    except RuntimeError as exc:
+        raise HTTPException(503,str(exc)) from exc
+    # The same answer whether or not the email has an account, and whether or not a code was sent.
+    return {"ok":True}
+
+@app.post("/shield/auth/reset")
+def local_reset_password_with_code(body:ResetPassword):
+    if os.getenv("SHIELD_API_AUTH_MODE", "development") != "local":
+        raise HTTPException(404,"local_identity_disabled")
+    from . import password_reset
+    from .local_identity import identity
+    try:
+        password_reset.confirm_reset(identity(),body.email,body.code,body.new_password)
+    except ValueError as exc:
+        raise HTTPException(400 if str(exc)==password_reset.GENERIC_FAILURE else 422,str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503,str(exc)) from exc
+    return {"ok":True,"signed_out_everywhere":True}
+
 @app.get("/shield/auth/me")
 def local_me(request:Request):
     actor=actor_for(request,None)
