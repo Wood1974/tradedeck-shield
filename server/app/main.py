@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import json, logging, os, uuid
 from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from .protocol import sha256_bytes, bind_hash
 from .store import Store
@@ -30,6 +30,16 @@ att=AttestationVerifier(att_mode,os.getenv("SHIELD_APP_ID",""),store=store)
 play=PlayIntegrityVerifier(os.getenv("SHIELD_PLAY_INTEGRITY_MODE",att_mode),os.getenv("SHIELD_PLAY_PACKAGE_NAME", "com.tradedeck.shield"))
 TTL=int(os.getenv("SHIELD_CHALLENGE_TTL_SECONDS","120"))
 app.include_router(identity_router)
+@app.middleware("http")
+async def _json_500(request, call_next):
+    # Registered before CORS so it sits inside it. An unhandled error then leaves as a normal JSON response that CORS
+    # decorates; left to the server-error layer it would carry no CORS headers and the phone would only say "network".
+    try:
+        return await call_next(request)
+    except Exception:
+        logging.getLogger(__name__).exception("Unhandled error on %s %s", request.method, request.url.path)
+        return JSONResponse({"error": "internal_error"}, status_code=500)
+
 # The phone app's web view calls this API from its own origin (iOS capacitor://localhost, Android https://localhost).
 # Without these the browser blocks the request at the preflight. Bearer tokens, not cookies, so no credentials mode.
 app.add_middleware(CORSMiddleware,
