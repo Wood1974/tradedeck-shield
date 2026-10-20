@@ -14,6 +14,15 @@ The sender address must be on a domain verified in Resend. Until the domain's DN
 
 A code is 8 digits, lasts 15 minutes, works once and allows 5 tries. Each account gets at most 3 codes an hour. `/forgot` gives the same answer whether or not the email has an account. A successful reset signs the account out everywhere. It does not depend on an administrator, so it still works after `lock-admin`; a locked administrator account still cannot be reset.
 
+## Sign-up by invite code
+
+Accounts are no longer made only by an administrator. A person with an invite code makes their own account in the app (a normal capturer account, never an administrator), so people can still join after administrator access is turned off.
+
+- Make codes before launch with `POST /shield/admin/invites` (`{"count": 5, "days": 14}`, administrator token) or in the Render shell: `python -m app.signup mint --count 5 --days 14`. Each code is shown once; only a hash is stored. Codes work once and expire (14 days by default, 90 at most).
+- `POST /shield/auth/signup` spends a code. A wrong, used or expired code all answer `invalid_or_expired_invite`. A code is not spent when the account cannot be made (short password, email already in use).
+- After `lock-admin` the HTTP route is closed with the rest of `/shield/admin/*`. Codes already made keep working until they expire, and the shell command still works for whoever has the Render shell, so make enough before the lock or keep that access.
+- Every account can run the ID check, which costs a Stripe Identity fee each time. Invite-only sign-up is what keeps that bounded. Open sign-up is deliberately not offered.
+
 ## iOS
 Open `ios/ShieldCamera/ShieldCamera.xcodeproj`, set the production bundle/team and HTTPS API URL, and archive with the owner's distribution certificate and provisioning profile. The Debug configuration uses the development App Attest entitlement; Release uses `ShieldCameraProduction.entitlements` with the production environment. Match `SHIELD_APP_ID` to the signing team's ID and bundle identifier. The app signs into Shield and keeps the access token in memory for that session. No gallery entitlement or picker is used. Validate the Swift build and a physical-device production assertion before release.
 
