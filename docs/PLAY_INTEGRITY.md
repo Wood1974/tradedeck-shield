@@ -23,7 +23,7 @@ verification flow and the `PLAY_RECOGNIZED` / `MEETS_DEVICE_INTEGRITY` verdicts.
 
 `SHIELD_PLAY_INTEGRITY_MODE=production`
 
-`SHIELD_PLAY_PACKAGE_NAME=com.tradedeck.shield`
+`SHIELD_PLAY_PACKAGE_NAME=app.tradedeck.shield` (the Capacitor app's Android id; the older native client in `android/` used `com.tradedeck.shield`)
 
 `GOOGLE_PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON` or
 `GOOGLE_PLAY_INTEGRITY_SERVICE_ACCOUNT_FILE` must be configured on the server.

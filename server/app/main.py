@@ -27,7 +27,7 @@ ALLOWED_IMAGE_TYPES={"image/jpeg","image/jpg"}
 store=Store(os.getenv("SHIELD_DATABASE_URL","sqlite:///./shield.db"), os.getenv("SHIELD_STORAGE_ROOT","./storage"))
 att_mode=os.getenv("SHIELD_ATTESTATION_MODE","development")
 att=AttestationVerifier(att_mode,os.getenv("SHIELD_APP_ID",""),store=store)
-play=PlayIntegrityVerifier(os.getenv("SHIELD_PLAY_INTEGRITY_MODE",att_mode),os.getenv("SHIELD_PLAY_PACKAGE_NAME", "com.tradedeck.shield"))
+play=PlayIntegrityVerifier(os.getenv("SHIELD_PLAY_INTEGRITY_MODE",att_mode),os.getenv("SHIELD_PLAY_PACKAGE_NAME", "app.tradedeck.shield"))
 TTL=int(os.getenv("SHIELD_CHALLENGE_TTL_SECONDS","120"))
 app.include_router(identity_router)
 @app.middleware("http")
