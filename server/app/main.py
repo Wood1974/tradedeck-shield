@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import json, logging, os, uuid
 from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from .protocol import sha256_bytes, bind_hash
 from .store import Store
@@ -94,6 +94,50 @@ def local_login(body:LocalLogin):
         raise HTTPException(503,str(exc)) from exc
     return {"access_token":token,"token_type":"bearer","expires_in":TOKEN_TTL_SECONDS,
             "account_id":account.id,"role":account.role}
+
+class CaptureUpload(BaseModel):
+    record: dict
+    signature_der_b64: str
+    public_key_uncompressed_b64: str
+    photo_b64: str
+    app_attest_key_id: str | None = None
+    app_attest_assertion_b64: str | None = None
+
+def _local_account_id(request:Request) -> str:
+    if os.getenv("SHIELD_API_AUTH_MODE", "development") != "local":
+        raise HTTPException(404,"local_identity_disabled")
+    return actor_for(request,None).account_id
+
+@app.post("/shield/captures")
+def store_capture(request:Request,body:CaptureUpload):
+    account_id=_local_account_id(request)
+    enforce_rate_limit(request)
+    from . import captures
+    from .local_identity import identity
+    try:
+        return captures.ingest(identity(),att,account_id,body.model_dump())
+    except captures.Refused as exc:
+        reason=str(exc)
+        raise HTTPException(413 if reason in {"photo_too_large","quota_exceeded"} else 422,reason) from exc
+
+@app.get("/shield/captures")
+def list_captures(request:Request):
+    account_id=_local_account_id(request)
+    from . import captures
+    from .local_identity import identity
+    return {"captures":captures.list_for(identity(),account_id)}
+
+@app.get("/shield/captures/{record_hash}/photo")
+def capture_photo(request:Request,record_hash:str):
+    account_id=_local_account_id(request)
+    from . import captures
+    from .local_identity import identity
+    try:
+        data=captures.read_photo(identity(),account_id,record_hash)
+    except captures.Refused as exc:
+        raise HTTPException(409,str(exc)) from exc
+    if data is None: raise HTTPException(404,"not_found")
+    return Response(data,media_type="image/jpeg",headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
 
 class ForgotPassword(BaseModel):
     email: str
