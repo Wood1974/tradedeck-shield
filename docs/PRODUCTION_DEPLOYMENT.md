@@ -14,6 +14,16 @@ The sender address must be on a domain verified in Resend. Until the domain's DN
 
 A code is 8 digits, lasts 15 minutes, works once and allows 5 tries. Each account gets at most 3 codes an hour. `/forgot` gives the same answer whether or not the email has an account. A successful reset signs the account out everywhere. It does not depend on an administrator, so it still works after `lock-admin`; a locked administrator account still cannot be reset.
 
+## Stored photos
+
+A signed-in phone uploads each sealed photo (the signed record plus the original JPEG) to `POST /shield/captures`. It is stored under `$SHIELD_STORAGE_ROOT/captures/<account>/` (on Render that is `/data/storage`, the same 10 GB disk as the database) and listed with `GET /shield/captures`; `GET /shield/captures/<record_hash>/photo` returns the JPEG. Only the account that uploaded a photo can list or read it, and there is no administrator route to read one.
+
+- Nothing is stored unless the record's bytes reproduce its hash, the whole uploaded file hashes to the signed `photo_sha256`, and the device signature verifies. Failing uploads are refused with a reason; the phone keeps its copy. Uploading the same record twice is safe.
+- The Apple assertion, when the phone sends one, is checked against the key the account enrolled and the result is stored as `attest` (`verified`, or the reason it could not be). A missing or failed assertion never blocks a photo. Assertions are checked in the order they were made (Apple's counter must rise), so the app uploads oldest first.
+- Limits: `SHIELD_MAX_PHOTO_BYTES` (15 MiB) per photo and `SHIELD_ACCOUNT_QUOTA_MB` (1024) per account. The disk is shared, so size the quota to the number of accounts, and **back up `/data`**: photos live only there and on the phones.
+- What this does not show: who holds the signing key (it is not tied to the account), that the scene is true, or the time beyond the phone's clock.
+- This changes what the app tells people: photos are no longer only on the phone. Update the privacy policy and any "stays on this phone" wording before a public release.
+
 ## iOS
 Open `ios/ShieldCamera/ShieldCamera.xcodeproj`, set the production bundle/team and HTTPS API URL, and archive with the owner's distribution certificate and provisioning profile. The Debug configuration uses the development App Attest entitlement; Release uses `ShieldCameraProduction.entitlements` with the production environment. Match `SHIELD_APP_ID` to the signing team's ID and bundle identifier. The app signs into Shield and keeps the access token in memory for that session. No gallery entitlement or picker is used. Validate the Swift build and a physical-device production assertion before release.
 
