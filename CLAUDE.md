@@ -38,6 +38,7 @@ Standing instructions from the owner. They apply to every session in this repo, 
 ## Running it
 
 - Tests: `cd server && python -m pytest` (install `requirements.txt` plus `pytest` and `httpx`). Run them before any push.
+- `server/tests/test_ingest_fuzz.py` damages uploads at random and requires that nothing crashes and that anything stored also passes `verifier/shield_verify.py`; `.github/workflows/nightly-fuzz.yml` runs 20000 rounds a night with a new seed (printed in the log).
 - Cloud sessions can't call the live server (the egress proxy refuses it). Check the live server through Render's logs and the dashboard, not `curl`.
 
 ## Facts that bite
