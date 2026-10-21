@@ -47,6 +47,14 @@ app.add_middleware(CORSMiddleware,
     allow_methods=["GET","POST","OPTIONS"], allow_headers=["Authorization","Content-Type"], max_age=600)
 
 @app.on_event("startup")
+def _start_outside_time():
+    # Off unless SHIELD_TSA_ENABLED=true. Never delays startup or uploads.
+    from . import outside_time
+    if outside_time.enabled() and os.getenv("SHIELD_API_AUTH_MODE","development") == "local":
+        from .local_identity import identity
+        outside_time.start_daily(identity())
+
+@app.on_event("startup")
 def _bootstrap_first_admin():
     # A host with no shell has no other way to make the first account. Does nothing once any admin exists.
     if os.getenv("SHIELD_API_AUTH_MODE","development") == "local":
@@ -138,6 +146,16 @@ def capture_photo(request:Request,record_hash:str):
         raise HTTPException(409,str(exc)) from exc
     if data is None: raise HTTPException(404,"not_found")
     return Response(data,media_type="image/jpeg",headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
+
+@app.get("/shield/captures/{record_hash}/timestamp")
+def capture_timestamp(request:Request,record_hash:str):
+    account_id=_local_account_id(request)
+    from . import outside_time
+    from .local_identity import identity
+    if len(record_hash)!=64 or any(c not in "0123456789abcdef" for c in record_hash): raise HTTPException(404,"not_found")
+    found=outside_time.token_for(identity(),account_id,record_hash)
+    if found is None: raise HTTPException(404,"not_found")
+    return found
 
 class ForgotPassword(BaseModel):
     email: str
