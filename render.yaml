@@ -25,6 +25,6 @@ services:
       - key: SHIELD_APP_ID
         value: 766456AWH4.app.tradedeck.shield
       - key: SHIELD_PLAY_PACKAGE_NAME
-        value: com.tradedeck.shield
+        value: app.tradedeck.shield
       - key: GOOGLE_PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON
         sync: false

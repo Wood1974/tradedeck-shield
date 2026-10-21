@@ -4,7 +4,7 @@ from app.play_integrity import PlayIntegrityVerifier
 def payload(request_hash, *, app="PLAY_RECOGNIZED", device=None, license="LICENSED", timestamp="2000000000000"):
     return {
         "requestDetails": {
-            "requestPackageName": "com.tradedeck.shield",
+            "requestPackageName": "app.tradedeck.shield",
             "requestHash": request_hash,
             "timestampMillis": timestamp,
         },
@@ -15,7 +15,7 @@ def payload(request_hash, *, app="PLAY_RECOGNIZED", device=None, license="LICENS
 
 
 def test_play_integrity_accepts_matching_verdict(monkeypatch):
-    v = PlayIntegrityVerifier("production", "com.tradedeck.shield")
+    v = PlayIntegrityVerifier("production", "app.tradedeck.shield")
     monkeypatch.setattr(v, "_decode", lambda token: payload("abc", timestamp="1000000000000"))
     result = v.verify("token", "abc", now_ms=1000000001000)
     assert result["trusted"] is True
@@ -23,7 +23,7 @@ def test_play_integrity_accepts_matching_verdict(monkeypatch):
 
 
 def test_play_integrity_rejects_request_hash(monkeypatch):
-    v = PlayIntegrityVerifier("production", "com.tradedeck.shield")
+    v = PlayIntegrityVerifier("production", "app.tradedeck.shield")
     monkeypatch.setattr(v, "_decode", lambda token: payload("wrong", timestamp="1000000000000"))
     result = v.verify("token", "abc", now_ms=1000000001000)
     assert result["trusted"] is False
@@ -31,7 +31,7 @@ def test_play_integrity_rejects_request_hash(monkeypatch):
 
 
 def test_play_integrity_rejects_unrecognized_app(monkeypatch):
-    v = PlayIntegrityVerifier("production", "com.tradedeck.shield")
+    v = PlayIntegrityVerifier("production", "app.tradedeck.shield")
     monkeypatch.setattr(v, "_decode", lambda token: payload("abc", app="UNRECOGNIZED_VERSION", timestamp="1000000000000"))
     result = v.verify("token", "abc", now_ms=1000000001000)
     assert result["trusted"] is False
@@ -39,7 +39,7 @@ def test_play_integrity_rejects_unrecognized_app(monkeypatch):
 
 
 def test_play_integrity_rejects_device_failure(monkeypatch):
-    v = PlayIntegrityVerifier("production", "com.tradedeck.shield")
+    v = PlayIntegrityVerifier("production", "app.tradedeck.shield")
     monkeypatch.setattr(v, "_decode", lambda token: payload("abc", device=[], timestamp="1000000000000"))
     result = v.verify("token", "abc", now_ms=1000000001000)
     assert result["trusted"] is False
@@ -47,7 +47,7 @@ def test_play_integrity_rejects_device_failure(monkeypatch):
 
 
 def test_play_integrity_rejects_stale_token(monkeypatch):
-    v = PlayIntegrityVerifier("production", "com.tradedeck.shield")
+    v = PlayIntegrityVerifier("production", "app.tradedeck.shield")
     monkeypatch.setattr(v, "_decode", lambda token: payload("abc", timestamp="1000000000000"))
     result = v.verify("token", "abc", now_ms=1000001000000)
     assert result["trusted"] is False

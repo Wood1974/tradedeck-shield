@@ -1,5 +1,7 @@
 # Section 7 — Supabase Storage & Custody
 
+> **Status (20 Oct 2026): not used by the deployed server.** The standalone Shield server stores evidence metadata in SQLite and originals as files on its persistent disk (`/data`). This document describes the Supabase storage design for an integration that is not enabled; the bundled Supabase migrations are historical.
+
 Section 7 adds the production persistence boundary for Shield evidence.
 
 ## Production model

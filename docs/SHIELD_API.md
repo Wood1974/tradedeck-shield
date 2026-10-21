@@ -4,9 +4,10 @@ Section 5 makes the Shield API the authoritative server boundary between native 
 
 ## Authority rules
 
-- In production, every protected request requires `Authorization: Bearer <Supabase access token>`.
-- The server verifies the Supabase JWT signature, issuer, audience, expiration, and subject using the project's JWKS endpoint.
-- `sub` is the authoritative `account_id`. A client cannot choose another account ID in production.
+- Every protected request requires `Authorization: Bearer <access token>`. There are two auth modes, set by `SHIELD_API_AUTH_MODE`:
+  - **`local` (what is deployed).** Shield's own accounts (`POST /shield/auth/login`); the token is an HS256 JWT signed with `SHIELD_LOCAL_JWT_SECRET`. No Supabase involved.
+  - **`production` (Supabase JWT, not deployed).** The server verifies a Supabase JWT's signature, issuer, audience, expiration and subject against the project's JWKS endpoint. Kept for an integration that is not enabled.
+- In either mode `sub` is the authoritative `account_id`. A client cannot choose another account ID.
 - Challenge context is created and stored by Shield. The client cannot create its own nonce.
 - A challenge is one-time, expires after the configured TTL, and is bound to job, point, and account.
 - The server computes the photo hash from the exact uploaded bytes.
@@ -45,6 +46,8 @@ The server derives:
 Platform attestation must bind to this exact `bind_hash`.
 
 ## Authentication
+
+*This section describes the `production` (Supabase) mode. The deployed server runs `local` mode; see above.*
 
 Supabase Auth access tokens are verified against:
 
