@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TradeDeck Shield — Check a photo</title>
+<meta name="robots" content="noindex">
+<style>
+:root{--bg:#0b0d10;--card:#15191f;--ink:#f5f7fa;--mute:#aab2bd;--ok:#7fe0a9;--bad:#ff9d9d;--warn:#f2c36b;--line:#2a3340}
+@media (prefers-color-scheme:light){:root{--bg:#f4f6f8;--card:#fff;--ink:#14202b;--mute:#52606d;--ok:#0b6b3a;--bad:#9b1c1c;--warn:#8a5a00;--line:#d9e0e6}}
+body{font:16px/1.55 system-ui,-apple-system,sans-serif;max-width:720px;margin:0 auto;padding:24px 16px 48px;background:var(--bg);color:var(--ink)}
+h1{font-size:26px;margin:8px 0 4px}p{margin:8px 0}.muted{color:var(--mute)}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:14px 0}
+.warn{border-left:5px solid var(--warn)}
+label{display:block;margin-top:12px;font-weight:600}
+input,button{font:inherit;padding:12px;margin:6px 0;width:100%;box-sizing:border-box;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+button{font-weight:700;cursor:pointer}
+#result h2{margin:0 0 6px}.match{color:var(--ok)}.nomatch{color:var(--bad)}
+ul{padding-left:20px}li{margin:4px 0}
+</style>
+</head>
+<body>
+<h1>Check a photo against Shield</h1>
+<p class="muted">Compare a photo with the copy Shield stored when its owner uploaded it. No account needed.</p>
+<div class="box warn">
+  <strong>Use the original file.</strong>
+  <p>Photos sent by email or by a messaging app are usually recompressed. A recompressed copy is a different file and will not match, even if it looks identical. Ask the person who took the photo to send the original as a file or attachment, not as a picture in a message. Shield keeps the original.</p>
+</div>
+<form id="f">
+  <label for="code">Share code</label>
+  <input id="code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" required>
+  <label for="photo">Original photo file</label>
+  <input id="photo" name="photo" type="file" accept="image/jpeg,.jpg,.jpeg" required>
+  <button id="go" type="submit">Check</button>
+</form>
+<div id="result" class="box" hidden></div>
+<script>
+(function(){
+  var f=document.getElementById('f'),out=document.getElementById('result'),go=document.getElementById('go');
+  // The code can arrive in the link's fragment, which the browser never sends to any server.
+  var m=/[#&]code=([^&]+)/.exec(location.hash);if(m){try{f.code.value=decodeURIComponent(m[1]);}catch(e){}}
+  function el(tag,text,cls){var n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n}
+  function say(nodes){out.hidden=false;out.replaceChildren.apply(out,nodes)}
+  function yes(v){return v?'yes':'NO'}
+  f.addEventListener('submit',async function(e){
+    e.preventDefault();go.disabled=true;say([el('p','Checking…','muted')]);
+    try{
+      var r=await fetch('/shield/v1/compare',{method:'POST',body:new FormData(f)});
+      if(r.status===404){say([el('h2','Not found','nomatch'),el('p','That code is not valid, has expired or was withdrawn. Ask the photo’s owner for a new one.')]);return}
+      if(r.status===413){say([el('p','That file is too large.','nomatch')]);return}
+      if(r.status===429){say([el('p','Too many checks right now. Try again later.','nomatch')]);return}
+      if(!r.ok){say([el('p','Something went wrong. Try again.','nomatch')]);return}
+      var d=await r.json(),n=[];
+      n.push(el('h2',d.match?'MATCH: this is the file Shield stored':'NO MATCH',(d.match?'match':'nomatch')));
+      if(d.uploaded_at)n.push(el('p','Uploaded to Shield: '+d.uploaded_at+' (Shield’s clock)'));
+      var c=d.checks||{},ul=el('ul');
+      [['This file equals the stored photo',c.supplied_equals_stored],['The stored photo is unchanged',c.stored_original_intact],['The stored record’s signature is valid',c.record_signature_valid]].forEach(function(x){ul.appendChild(el('li',x[0]+': '+yes(x[1])))});
+      n.push(ul);
+      var u=d.uploader||{};
+      n.push(el('p',u.id_check==='passed'?'The account that uploaded it passed a photo-ID and selfie check on '+u.on+(u.before_upload?'.':' (after this upload).'):u.id_check==='test_mode'?'The uploading account’s ID check was a test, not a real ID check.':'The account that uploaded it has not passed an ID check.'));
+      var dc=d.device_check||{};
+      n.push(el('p','Apple device check: '+(dc.status==='verified'?'verified by the server':'not verified ('+dc.detail+')')));
+      if(d.hint)n.push(el('p',d.hint,'nomatch'));
+      n.push(el('h3','What this does not show'));
+      var lim=el('ul');(d.limitations||[]).forEach(function(t){lim.appendChild(el('li',t))});n.push(lim);
+      say(n);
+    }catch(err){say([el('p','Could not reach Shield. Check the connection and try again.','nomatch')])}
+    finally{go.disabled=false}
+  });
+})();
+</script>
+</body>
+</html>

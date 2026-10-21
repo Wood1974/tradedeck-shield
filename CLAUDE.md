@@ -25,6 +25,7 @@ Standing instructions from the owner. They apply to every session in this repo, 
 - Photos are stored on the Shield server disk and are readable only by the account that took them. No administrator route reads them.
 - Honest labels: never say a photo is "attested" unless a server verified Apple's assertion. Say what was actually checked; a valid signature alone does not show the image matches.
 - Construction content uses Utah building codes only.
+- A stored photo can be checked by an outsider only with a share code the photographer made (private to the photographer). The checker learns only whether the uploader's account passed the ID check, never a name. Only uploaded photos can be compared, and only the original file matches.
 
 ## What's here
 

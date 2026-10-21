@@ -24,6 +24,18 @@ A signed-in phone uploads each sealed photo (the signed record plus the original
 - What this does not show: who holds the signing key (it is not tied to the account), that the scene is true, or the time beyond the phone's clock.
 - This changes what the app tells people: photos are no longer only on the phone. Update the privacy policy and any "stays on this phone" wording before a public release.
 
+## Checking a photo against the stored copy (share codes)
+
+Someone who needs a photo checked (an inspector, a lender) can compare it with the copy Shield stored, with no account, if the photographer gives them a **share code** and the **original file**.
+
+- The photographer makes a code for one uploaded photo: `POST /shield/captures/<record_hash>/share` (`{"days": 1-90}`, default 30). The code is 26 random characters, shown once, kept only as an HMAC, expires, and can be withdrawn with `DELETE /shield/shares/<id>`. `GET /shield/captures/<record_hash>/shares` lists the photographer's codes (never the codes themselves).
+- The checker opens `/check` (or posts to `POST /shield/v1/compare` with `code` and `photo`). The link may carry the code in its `#fragment`, which no server ever receives.
+- **Private to the photographer:** a wrong, expired or withdrawn code, and a file with no code, all answer the same `404 not_found`. Nothing is revealed without a code. The file is read in memory and dropped.
+- **The answer is facts only:** matched or not; the upload time on Shield's clock; whether the stored photo is unchanged and the record's device signature verifies; the Apple device-check result as stored; and, about the uploader, only whether the account passed the photo-ID and selfie check and on what day (`passed`, `test_mode` or `not_verified`). No name, account id, location, note or image.
+- Each check is appended to a hash-chained log (`compare_log`, the older custody-chain code): share id, result and time only. No file, no address.
+- **Limits:** only uploaded photos can be compared. A copy sent by email or a messaging app is usually recompressed and will not match, so the checker page and every no-match answer say to use the original file, sent as a file or attachment. A match does not show the scene is true, who held the signing key (it is not tied to the account), or when the photo was taken. A global cap of 600 checks an hour guards against floods; the per-address limiter may see only Render's proxy address (not checked).
+- Merkle proofs over uploaded records are planned as a second stage; they are not built.
+
 ## iOS
 Open `ios/ShieldCamera/ShieldCamera.xcodeproj`, set the production bundle/team and HTTPS API URL, and archive with the owner's distribution certificate and provisioning profile. The Debug configuration uses the development App Attest entitlement; Release uses `ShieldCameraProduction.entitlements` with the production environment. Match `SHIELD_APP_ID` to the signing team's ID and bundle identifier. The app signs into Shield and keeps the access token in memory for that session. No gallery entitlement or picker is used. Validate the Swift build and a physical-device production assertion before release.
 
