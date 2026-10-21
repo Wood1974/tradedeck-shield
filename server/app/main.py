@@ -40,6 +40,20 @@ async def _json_500(request, call_next):
         logging.getLogger(__name__).exception("Unhandled error on %s %s", request.method, request.url.path)
         return JSONResponse({"error": "internal_error"}, status_code=500)
 
+@app.middleware("http")
+async def security_middleware(request:Request,call_next):
+    # Registered before CORS so it sits inside it, and answering here instead of raising: an HTTPException raised in this
+    # layer is never turned into a response, so going over the limit came out as a bare 500 with no CORS headers, which the
+    # phone's web view reports only as "network".
+    try: enforce_rate_limit(request)
+    except HTTPException as exc:
+        return JSONResponse({"detail":exc.detail},status_code=exc.status_code,headers={"Retry-After":"60","X-Content-Type-Options":"nosniff","Cache-Control":"no-store"})
+    response=await call_next(request)
+    response.headers["X-Content-Type-Options"]="nosniff"
+    response.headers["Referrer-Policy"]="no-referrer"
+    response.headers["Cache-Control"]="no-store"
+    return response
+
 # The phone app's web view calls this API from its own origin (iOS capacitor://localhost, Android https://localhost).
 # Without these the browser blocks the request at the preflight. Bearer tokens, not cookies, so no credentials mode.
 app.add_middleware(CORSMiddleware,
@@ -222,15 +236,6 @@ def local_reset_password(request:Request,account_id:str,body:LocalPasswordReset)
     try: local.reset_password(account_id,body.password)
     except ValueError as exc: raise HTTPException(422,str(exc)) from exc
     return {"reset":True,"tokens_revoked":True}
-
-@app.middleware("http")
-async def security_middleware(request:Request,call_next):
-    enforce_rate_limit(request)
-    response=await call_next(request)
-    response.headers["X-Content-Type-Options"]="nosniff"
-    response.headers["Referrer-Policy"]="no-referrer"
-    response.headers["Cache-Control"]="no-store"
-    return response
 
 class ChallengeOut(BaseModel):
     job_id:str; point_id:str; nonce:str; expires_at:float
