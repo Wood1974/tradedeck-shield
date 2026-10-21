@@ -29,6 +29,7 @@ Standing instructions from the owner. They apply to every session in this repo, 
 ## What's here
 
 - `server/app/main.py`: FastAPI app and routes. `server/app/local_identity.py`: Shield's own accounts (scrypt passwords, HS256 tokens, admin CLI). `password_reset.py`: emailed one-time code via Resend. `attestation.py`: Apple App Attest checks (attestation and assertion). `identity_api.py`: Stripe Identity ID check and signed receipts. `security.py`: rate limiting. Look in `server/app/` for what exists before assuming a feature is there; open PRs add things.
+- `docs/RECORD_SPEC.md` is the written format of a photo record; `verifier/shield_verify.py` checks records from that page alone, without Shield's code (`server/tests/test_verifier.py` keeps it in agreement with the server).
 - `docs/PRODUCTION_DEPLOYMENT.md` has a section per feature and the pre-release gates. `docs/OPERATIONS.md` covers running it.
 - Data: SQLite at `SHIELD_DATABASE_URL`, files under `SHIELD_STORAGE_ROOT`. On Render both are on the 10 GB persistent disk at `/data`. **There is one copy: back up `/data`.**
 - Accounts: `SHIELD_API_AUTH_MODE=local` turns on Shield's own accounts. The app signs in at `/shield/auth/login`.
