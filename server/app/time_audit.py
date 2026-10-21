@@ -46,10 +46,10 @@ def assess(record: dict, previous: dict | None, received_at_ms: int) -> dict:
         same = _same_boot(record, previous)
         if same is None:
             unverified = True
-            notes.append("the record before it does not say which boot it came from, so the interval between them cannot be judged")
+            notes.append("the earlier reading does not say which boot it came from, so the interval cannot be judged")
         elif not same:
             unverified = True
-            notes.append("the phone restarted between this photo and the one before it; a restart is not tampering, but the interval cannot be judged")
+            notes.append("the phone restarted since the earlier reading; a restart is not tampering, but the interval cannot be judged")
         else:
             d_mono = record["monotonic_ms"] - previous["monotonic_ms"]
             d_wall = record["wall_time_ms"] - previous["wall_time_ms"]
@@ -58,7 +58,7 @@ def assess(record: dict, previous: dict | None, received_at_ms: int) -> dict:
                 notes.append("the phone's monotonic clock ran backward within one boot, so the interval cannot be judged")
             elif abs(d_wall - d_mono) > LIMIT_MS:
                 mismatch = True
-                notes.append(f"between this photo and the one before it, the wall clock moved {abs(d_wall - d_mono) / 1000:.0f} s differently from the monotonic clock")
+                notes.append(f"since the earlier reading, the wall clock moved {abs(d_wall - d_mono) / 1000:.0f} s differently from the monotonic clock")
             else:
                 passed = True
 
@@ -82,5 +82,5 @@ def assess(record: dict, previous: dict | None, received_at_ms: int) -> dict:
         label = CONSISTENT
     else:
         label = NOT_CHECKED
-        notes.append("nothing to compare it with: no earlier record from this chain on the server and no GPS time")
+        notes.append("nothing to compare it with: no job ticket or earlier record from this chain on the server and no GPS time")
     return {"label": label, "notes": notes}
