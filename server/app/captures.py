@@ -31,6 +31,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from . import outside_time
 from .local_identity import LocalIdentity
 
 RECORD_VERSION = 1
@@ -159,12 +160,13 @@ def _photo_path(account_id: str, record_hash: str) -> Path:
     return storage_root() / account_id / f"{record_hash}.jpg"
 
 
-def _view(row) -> dict:
+def _view(row, cover: dict | None = None) -> dict:
     return {
         "id": row["id"], "record_hash": row["record_hash"], "ticket_id": row["ticket_id"], "checkpoint_id": row["checkpoint_id"],
         "photo_sha256": row["photo_sha256"], "bytes": row["photo_bytes"], "received_at": row["received_at"],
         "integrity": "verified",
         "attest": {"status": row["attest_status"], "trusted": bool(row["attest_trusted"])},
+        "outside_time": outside_time.view(cover),
     }
 
 
@@ -232,7 +234,8 @@ def list_for(local: LocalIdentity, account_id: str, limit: int = 200) -> list[di
     _init(local)
     with local.db() as db:
         rows = db.execute("SELECT * FROM captures WHERE account_id=? ORDER BY received_at DESC LIMIT ?", (account_id, limit)).fetchall()
-    return [_view(r) for r in rows]
+    cover = outside_time.coverage(local, account_id)
+    return [_view(r, cover.get(r["record_hash"])) for r in rows]
 
 
 def read_photo(local: LocalIdentity, account_id: str, record_hash: str) -> bytes | None:
