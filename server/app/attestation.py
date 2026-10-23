@@ -170,10 +170,13 @@ class AttestationVerifier:
             ad = _parse_auth_data(auth, attestation=True)
             client_data_hash = hashlib.sha256(challenge).digest()
             nonce = hashlib.sha256(auth + client_data_hash).digest()
-            ext = leaf.extensions.get(APPLE_NONCE_OID)
-            if ext is None:
-                raise ValueError("missing_nonce_extension")
-            ext_nonce = _find_octet_string(ext.value, nonce)
+            # Extensions has no .get(): a missing extension raises ExtensionNotFound, so look it up explicitly.
+            try:
+                ext = leaf.extensions.get_extension_for_oid(APPLE_NONCE_OID)
+            except x509.ExtensionNotFound:
+                raise ValueError("missing_nonce_extension") from None
+            # The OID is Apple's own, so cryptography hands back an UnrecognizedExtension; its raw DER is .value.value.
+            ext_nonce = _find_octet_string(ext.value.value, nonce)
             if ext_nonce != nonce:
                 raise ValueError("attestation_nonce_mismatch")
             raw_pub, _ = _credential_public_key_from_cert(leaf)
@@ -198,7 +201,8 @@ class AttestationVerifier:
                 "receipt_b64": _b64encode(stmt.get("receipt", b"")),
             }
         except Exception as e:
-            return {"trusted": False, "status": str(e)}
+            # Some errors (a bad signature) have no text; the status must still say something.
+            return {"trusted": False, "status": str(e) or type(e).__name__}
 
     def update_counter(self, key_id: str | None, counter: int) -> bool:
         if not key_id or not self.store:

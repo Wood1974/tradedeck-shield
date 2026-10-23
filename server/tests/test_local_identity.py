@@ -88,7 +88,7 @@ def test_production_health_requires_platform_configuration(monkeypatch,tmp_path)
     monkeypatch.setenv('SHIELD_APP_ID','TEAMID.com.tradedeck.shield')
     monkeypatch.delenv('SHIELD_PLAY_PACKAGE_NAME',raising=False)
     assert client.get('/shield/v1/health').json()['detail']=='play_package_not_configured'
-    monkeypatch.setenv('SHIELD_PLAY_PACKAGE_NAME','com.tradedeck.shield')
+    monkeypatch.setenv('SHIELD_PLAY_PACKAGE_NAME','app.tradedeck.shield')
     monkeypatch.delenv('GOOGLE_PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON',raising=False)
     monkeypatch.delenv('GOOGLE_PLAY_INTEGRITY_SERVICE_ACCOUNT_FILE',raising=False)
     assert client.get('/shield/v1/health').json()['detail']=='play_integrity_credentials_not_configured'

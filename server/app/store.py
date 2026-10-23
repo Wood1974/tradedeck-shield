@@ -56,7 +56,7 @@ class Store:
     def attestation_challenge(self, account_id, ttl):
         nonce = secrets.token_urlsafe(32); now=time.time()
         with self.db() as c:
-            c.execute("INSERT INTO attestation_challenges VALUES (?,?,?,?,?)", (nonce, account_id, now+ttl, None))
+            c.execute("INSERT INTO attestation_challenges(nonce,account_id,expires_at,used_at) VALUES(?,?,?,?)", (nonce, account_id, now+ttl, None))
         return nonce, now+ttl
 
     def consume_attestation_challenge(self, nonce, account_id):

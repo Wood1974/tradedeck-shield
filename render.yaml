@@ -23,8 +23,8 @@ services:
       - key: SHIELD_LOCAL_JWT_SECRET
         generateValue: true
       - key: SHIELD_APP_ID
-        value: 766457AWH4.com.tradedeck.shield
+        value: 766456AWH4.app.tradedeck.shield
       - key: SHIELD_PLAY_PACKAGE_NAME
-        value: com.tradedeck.shield
+        value: app.tradedeck.shield
       - key: GOOGLE_PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON
         sync: false
