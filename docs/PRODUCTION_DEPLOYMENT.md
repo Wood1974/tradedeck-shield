@@ -25,6 +25,16 @@ A signed-in phone uploads each sealed photo (the signed record plus the original
 - What this does not show: who holds the signing key (it is not tied to the account), that the scene is true, or the time beyond the phone's clock.
 - This changes what the app tells people: photos are no longer only on the phone. Update the privacy policy and any "stays on this phone" wording before a public release.
 
+## Outside time-stamp (RFC 3161), off until enabled
+
+Once a day the server sends a time-stamp authority the hash of each account's **chain head** (a stored record that no later record links to; its hash already commits to every record before it) and keeps the signed reply. Only that hash leaves the server: `SHA-256("shield-chain-head-v1|" + record_hash)`. `GET /shield/captures` then shows `outside_time` per photo (`stamped` with the authority's time, `waiting`, or `off`), and `GET /shield/captures/<record_hash>/timestamp` returns the stored reply for the photographer to keep.
+
+- Off unless `SHIELD_TSA_ENABLED=true`. **Setting it changes live behaviour (an outside call once a day) and needs the owner's go.** `SHIELD_TSA_URL` defaults to DigiCert's public service, `http://timestamp.digicert.com`. A failed call is logged and retried on the next run; it never blocks or delays an upload.
+- `SHIELD_TSA_CA_PEM_PATH` (optional): a file of the trusted roots. Without it a reply is still checked (granted; imprint and nonce match; signed attributes bind the time; the signer certificate is a time-stamping certificate valid at that time; the signature verifies) but the stamp says `chain_checked: false`, because nothing says which roots to trust. Nothing in this repo bundles DigiCert's roots: get them from DigiCert and put the file on the disk.
+- What a stamp shows: the authority says the chain up to that head existed by its time. It does not show who made a photo, that the scene is true, or when it was taken (only an upper bound). A record stored after the last run reads `waiting`.
+- Anyone can check a kept reply without Shield: `openssl ts -verify -in reply.tsr -digest <imprint_sha256> -CAfile roots.pem` (save `reply_der_b64` decoded as `reply.tsr`). The same command is used on the OpenSSL-made fixture in `server/tests/vectors/tsa/`.
+- Not verified from here: a live call to DigiCert (cloud sessions cannot reach it). Check the first run in Render's logs ("Outside time-stamp ..." warnings mean a head was not stamped) before relying on it.
+
 ## Server job ticket (closed until a signing key is set)
 
 While the phone has signal, and before its first photo for a ticket id (the job id, or `device`), it asks `POST /shield/tickets` for a ticket: the account, the ticket id, the server's clock and an expiry (7 days), signed by the server's ticket key. The phone countersigns with its hardware key (`signGenesis`: `shield-genesis-v1` followed by `SHA256(ticket_hash || canonical(clock))`) and posts it to `POST /shield/tickets/countersign`. The server checks its own signature, the account, the expiry and the phone's signature, then stores the start, once per account and ticket id (an exact replay answers `already`; a different second ticket for the same id is refused with 409 `ticket_already_started`). The phone then uses the ticket hash as the first record's `prev_hash` (`adoptServerTicket`).
