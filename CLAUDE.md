@@ -39,6 +39,7 @@ Standing instructions from the owner. They apply to every session in this repo, 
 
 - Tests: `cd server && python -m pytest` (install `requirements.txt` plus `pytest` and `httpx`). Run them before any push.
 - `server/tests/test_ingest_fuzz.py` damages uploads at random and requires that nothing crashes and that anything stored also passes `verifier/shield_verify.py`; `.github/workflows/nightly-fuzz.yml` runs 20000 rounds a night with a new seed (printed in the log).
+- Outside time-stamps (`app/outside_time.py`, `app/rfc3161.py`) are off unless `SHIELD_TSA_ENABLED=true`; turning it on is a live change for the owner to approve. Tests use a reply made by OpenSSL (`server/tests/vectors/tsa/`).
 - Cloud sessions can't call the live server (the egress proxy refuses it). Check the live server through Render's logs and the dashboard, not `curl`.
 
 ## Facts that bite
