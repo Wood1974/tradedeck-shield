@@ -14,6 +14,26 @@ The sender address must be on a domain verified in Resend. Until the domain's DN
 
 A code is 8 digits, lasts 15 minutes, works once and allows 5 tries. Each account gets at most 3 codes an hour. `/forgot` gives the same answer whether or not the email has an account. A successful reset signs the account out everywhere. It does not depend on an administrator, so it still works after `lock-admin`; a locked administrator account still cannot be reset.
 
+## Stored photos
+
+A signed-in phone uploads each sealed photo (the signed record plus the original JPEG) to `POST /shield/captures`. It is stored under `$SHIELD_STORAGE_ROOT/captures/<account>/` (on Render that is `/data/storage`, the same 10 GB disk as the database) and listed with `GET /shield/captures`; `GET /shield/captures/<record_hash>/photo` returns the JPEG. Only the account that uploaded a photo can list or read it, and there is no administrator route to read one.
+
+- Nothing is stored unless the record's bytes reproduce its hash, the whole uploaded file hashes to the signed `photo_sha256`, and the device signature verifies. Failing uploads are refused with a reason; the phone keeps its copy. Uploading the same record twice is safe.
+- The Apple assertion, when the phone sends one, is checked against the key the account enrolled and the result is stored as `attest` (`verified`, or the reason it could not be). A missing or failed assertion never blocks a photo. Assertions are checked in the order they were made (Apple's counter must rise), so the app uploads oldest first.
+- Limits: `SHIELD_MAX_PHOTO_BYTES` (15 MiB) per photo and `SHIELD_ACCOUNT_QUOTA_MB` (1024) per account. The disk is shared, so size the quota to the number of accounts, and **back up `/data`**: photos live only there and on the phones.
+- What this does not show: who holds the signing key (it is not tied to the account), that the scene is true, or the time beyond the phone's clock.
+- This changes what the app tells people: photos are no longer only on the phone. Update the privacy policy and any "stays on this phone" wording before a public release.
+
+## Outside time-stamp (RFC 3161), off until enabled
+
+Once a day the server sends a time-stamp authority the hash of each account's **chain head** (a stored record that no later record links to; its hash already commits to every record before it) and keeps the signed reply. Only that hash leaves the server: `SHA-256("shield-chain-head-v1|" + record_hash)`. `GET /shield/captures` then shows `outside_time` per photo (`stamped` with the authority's time, `waiting`, or `off`), and `GET /shield/captures/<record_hash>/timestamp` returns the stored reply for the photographer to keep.
+
+- Off unless `SHIELD_TSA_ENABLED=true`. **Setting it changes live behaviour (an outside call once a day) and needs the owner's go.** `SHIELD_TSA_URL` defaults to DigiCert's public service, `http://timestamp.digicert.com`. A failed call is logged and retried on the next run; it never blocks or delays an upload.
+- `SHIELD_TSA_CA_PEM_PATH` (optional): a file of the trusted roots. Without it a reply is still checked (granted; imprint and nonce match; signed attributes bind the time; the signer certificate is a time-stamping certificate valid at that time; the signature verifies) but the stamp says `chain_checked: false`, because nothing says which roots to trust. Nothing in this repo bundles DigiCert's roots: get them from DigiCert and put the file on the disk.
+- What a stamp shows: the authority says the chain up to that head existed by its time. It does not show who made a photo, that the scene is true, or when it was taken (only an upper bound). A record stored after the last run reads `waiting`.
+- Anyone can check a kept reply without Shield: `openssl ts -verify -in reply.tsr -digest <imprint_sha256> -CAfile roots.pem` (save `reply_der_b64` decoded as `reply.tsr`). The same command is used on the OpenSSL-made fixture in `server/tests/vectors/tsa/`.
+- Not verified from here: a live call to DigiCert (cloud sessions cannot reach it). Check the first run in Render's logs ("Outside time-stamp ..." warnings mean a head was not stamped) before relying on it.
+
 ## Sign-up by invite code
 
 Accounts are no longer made only by an administrator. A person with an invite code makes their own account in the app (a normal capturer account, never an administrator), so people can still join after administrator access is turned off.
