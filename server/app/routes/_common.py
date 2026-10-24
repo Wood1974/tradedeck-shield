@@ -12,3 +12,13 @@ def local_account_id(request: Request) -> str:
     if os.getenv("SHIELD_API_AUTH_MODE", "development") != "local":
         raise HTTPException(404, "local_identity_disabled")
     return actor_for(request, None).account_id
+
+
+def local_admin(request:Request):
+    if os.getenv("SHIELD_API_AUTH_MODE", "development") != "local":
+        raise HTTPException(404,"local_identity_disabled")
+    actor=actor_for(request,None)
+    if actor.claims.get("role") != "admin":
+        raise HTTPException(403,"admin_required")
+    from ..local_identity import LocalAccount, identity
+    return identity(),LocalAccount(actor.account_id,"", "admin")
