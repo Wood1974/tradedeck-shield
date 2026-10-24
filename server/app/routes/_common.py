@@ -21,4 +21,6 @@ def local_admin(request:Request):
     if actor.claims.get("role") != "admin":
         raise HTTPException(403,"admin_required")
     from ..local_identity import LocalAccount, identity
+    if identity().is_locked():
+        raise HTTPException(403,"admin_locked")
     return identity(),LocalAccount(actor.account_id,"", "admin")

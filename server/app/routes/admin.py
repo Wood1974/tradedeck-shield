@@ -66,6 +66,8 @@ def local_reset_password(request:Request,account_id:str,body:LocalPasswordReset)
 
 @router.get("/shield/admin/health")
 def admin_health(request:Request):
+    from ..local_identity import admin_locked
+    if admin_locked(): raise HTTPException(403,"admin_locked")
     actor=actor_for(request,None)
     if os.getenv("SHIELD_API_AUTH_MODE","development") == "local":
         if actor.claims.get("role") != "admin": raise HTTPException(403,"admin_required")
