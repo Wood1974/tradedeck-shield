@@ -31,7 +31,8 @@ Standing instructions from the owner. They apply to every session in this repo, 
 
 - `server/app/main.py`: FastAPI app and routes. `server/app/local_identity.py`: Shield's own accounts (scrypt passwords, HS256 tokens, admin CLI). `password_reset.py`: emailed one-time code via Resend. `attestation.py`: Apple App Attest checks (attestation and assertion). `identity_api.py`: Stripe Identity ID check and signed receipts. `security.py`: rate limiting. Look in `server/app/` for what exists before assuming a feature is there; open PRs add things.
 - `docs/RECORD_SPEC.md` is the written format of a photo record; `verifier/shield_verify.py` checks records from that page alone, without Shield's code (`server/tests/test_verifier.py` keeps it in agreement with the server).
-- `docs/PRODUCTION_DEPLOYMENT.md` has a section per feature and the pre-release gates. `docs/OPERATIONS.md` covers running it.
+- **One file per feature.** Routes go in `server/app/routes/<feature>.py` (defines `router`; `app/routes/__init__.py` includes every module there, so `main.py` is not edited). Notes go in `docs/features/<feature>.md`, not in `docs/PRODUCTION_DEPLOYMENT.md` (setup and release gates only) and not as a new bullet here. Shared lists and `main.py` were where every PR collided.
+- `docs/OPERATIONS.md` covers running it.
 - Data: SQLite at `SHIELD_DATABASE_URL`, files under `SHIELD_STORAGE_ROOT`. On Render both are on the 10 GB persistent disk at `/data`. **There is one copy: back up `/data`.**
 - Accounts: `SHIELD_API_AUTH_MODE=local` turns on Shield's own accounts. The app signs in at `/shield/auth/login`.
 - `SHIELD_APP_ID` is `<team id>.<bundle id>` (`766456AWH4.app.tradedeck.shield`). A typo there makes every Apple check fail.
@@ -39,8 +40,6 @@ Standing instructions from the owner. They apply to every session in this repo, 
 ## Running it
 
 - Tests: `cd server && python -m pytest` (install `requirements.txt` plus `pytest` and `httpx`). Run them before any push.
-- Server tickets (`app/tickets.py`) are closed until `SHIELD_TICKET_SIGNING_KEY_PEM` is set; the key is a secret only the owner creates and sets on Render.
-- Outside time-stamps (`app/outside_time.py`, `app/rfc3161.py`) are off unless `SHIELD_TSA_ENABLED=true`; turning it on is a live change for the owner to approve. Tests use a reply made by OpenSSL (`server/tests/vectors/tsa/`).
 - Cloud sessions can't call the live server (the egress proxy refuses it). Check the live server through Render's logs and the dashboard, not `curl`.
 
 ## Facts that bite

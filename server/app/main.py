@@ -30,6 +30,8 @@ att=AttestationVerifier(att_mode,os.getenv("SHIELD_APP_ID",""),store=store)
 play=PlayIntegrityVerifier(os.getenv("SHIELD_PLAY_INTEGRITY_MODE",att_mode),os.getenv("SHIELD_PLAY_PACKAGE_NAME", "app.tradedeck.shield"))
 TTL=int(os.getenv("SHIELD_CHALLENGE_TTL_SECONDS","120"))
 app.include_router(identity_router)
+from .routes import include_all
+include_all(app)
 @app.middleware("http")
 async def _json_500(request, call_next):
     # Registered before CORS so it sits inside it. An unhandled error then leaves as a normal JSON response that CORS
@@ -102,93 +104,6 @@ def local_login(body:LocalLogin):
         raise HTTPException(503,str(exc)) from exc
     return {"access_token":token,"token_type":"bearer","expires_in":TOKEN_TTL_SECONDS,
             "account_id":account.id,"role":account.role}
-
-class CaptureUpload(BaseModel):
-    record: dict
-    signature_der_b64: str
-    public_key_uncompressed_b64: str
-    photo_b64: str
-    app_attest_key_id: str | None = None
-    app_attest_assertion_b64: str | None = None
-
-def _local_account_id(request:Request) -> str:
-    if os.getenv("SHIELD_API_AUTH_MODE", "development") != "local":
-        raise HTTPException(404,"local_identity_disabled")
-    return actor_for(request,None).account_id
-
-@app.post("/shield/captures")
-def store_capture(request:Request,body:CaptureUpload):
-    account_id=_local_account_id(request)
-    enforce_rate_limit(request)
-    from . import captures
-    from .local_identity import identity
-    try:
-        return captures.ingest(identity(),att,account_id,body.model_dump())
-    except captures.Refused as exc:
-        reason=str(exc)
-        raise HTTPException(413 if reason in {"photo_too_large","quota_exceeded"} else 422,reason) from exc
-
-@app.get("/shield/captures")
-def list_captures(request:Request):
-    account_id=_local_account_id(request)
-    from . import captures
-    from .local_identity import identity
-    return {"captures":captures.list_for(identity(),account_id)}
-
-@app.get("/shield/captures/{record_hash}/photo")
-def capture_photo(request:Request,record_hash:str):
-    account_id=_local_account_id(request)
-    from . import captures
-    from .local_identity import identity
-    try:
-        data=captures.read_photo(identity(),account_id,record_hash)
-    except captures.Refused as exc:
-        raise HTTPException(409,str(exc)) from exc
-    if data is None: raise HTTPException(404,"not_found")
-    return Response(data,media_type="image/jpeg",headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
-
-@app.get("/shield/captures/{record_hash}/timestamp")
-def capture_timestamp(request:Request,record_hash:str):
-    account_id=_local_account_id(request)
-    from . import outside_time
-    from .local_identity import identity
-    if len(record_hash)!=64 or any(c not in "0123456789abcdef" for c in record_hash): raise HTTPException(404,"not_found")
-    found=outside_time.token_for(identity(),account_id,record_hash)
-    if found is None: raise HTTPException(404,"not_found")
-    return found
-
-class TicketRequest(BaseModel):
-    ticket_id: str
-
-class TicketCountersign(BaseModel):
-    ticket: dict
-    server_signature_der_b64: str
-    ticket_clock: dict
-    signature_der_b64: str
-    public_key_uncompressed_b64: str
-
-@app.get("/shield/tickets/key")
-def ticket_key():
-    from . import tickets
-    try: return tickets.public_info()
-    except tickets.TicketsClosed as exc: raise HTTPException(503,str(exc)) from exc
-
-@app.post("/shield/tickets")
-def issue_ticket(request:Request,body:TicketRequest):
-    account_id=_local_account_id(request)
-    from . import tickets
-    try: return tickets.issue(account_id,body.ticket_id)
-    except tickets.TicketsClosed as exc: raise HTTPException(503,str(exc)) from exc
-    except tickets.Refused as exc: raise HTTPException(422,str(exc)) from exc
-
-@app.post("/shield/tickets/countersign")
-def countersign_ticket(request:Request,body:TicketCountersign):
-    account_id=_local_account_id(request)
-    from . import tickets
-    from .local_identity import identity
-    try: return tickets.countersign(identity(),account_id,body.model_dump())
-    except tickets.TicketsClosed as exc: raise HTTPException(503,str(exc)) from exc
-    except tickets.Refused as exc: raise HTTPException(409 if str(exc)=="ticket_already_started" else 422,str(exc)) from exc
 
 class ForgotPassword(BaseModel):
     email: str
