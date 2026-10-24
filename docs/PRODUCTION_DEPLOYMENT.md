@@ -7,44 +7,8 @@ Standalone mode uses `SHIELD_API_AUTH_MODE=local`, `SHIELD_AUTHZ_MODE=local`, an
 
 After creating the service and setting secrets, provision the first administrator from the server shell with `cd /app && python -m app.local_identity create-admin --email owner@example.com`. The command prompts for a 12+ character password. An administrator signs in with `POST /shield/auth/login`, creates capturer accounts via `POST /shield/admin/accounts`, and grants each allowed job and point via `POST /shield/admin/job-grants`. Capturers cannot self-register or assign themselves work. `DELETE /shield/admin/job-grants` revokes a job point; `POST /shield/admin/accounts/{account_id}/deactivate` invalidates an account and its tokens. `POST /shield/admin/accounts/{account_id}/reset-password` revokes old tokens; a locked-out administrator can run `python -m app.local_identity reset-password --email owner@example.com` from the server shell. Do not put passwords or access tokens into source files or logs.
 
-## Forgot password (emailed one-time code)
-The phone app's **Forgot password?** calls `POST /shield/auth/forgot` and `POST /shield/auth/reset`. A code is emailed through Resend, so the service needs two settings: `RESEND_API_KEY` (a sending-only key) and `SHIELD_MAIL_FROM` (for example `Shield <no-reply@tradedeckapp.com>`). Without them `/forgot` answers 503 `email_not_configured`.
-
-The sender address must be on a domain verified in Resend. Until the domain's DNS records are in place, Resend's test sender `Shield <onboarding@resend.dev>` works only for the Resend account owner's own email address.
-
-A code is 8 digits, lasts 15 minutes, works once and allows 5 tries. Each account gets at most 3 codes an hour. `/forgot` gives the same answer whether or not the email has an account. A successful reset signs the account out everywhere. It does not depend on an administrator, so it still works after `lock-admin`; a locked administrator account still cannot be reset.
-
-## Stored photos
-
-A signed-in phone uploads each sealed photo (the signed record plus the original JPEG) to `POST /shield/captures`. It is stored under `$SHIELD_STORAGE_ROOT/captures/<account>/` (on Render that is `/data/storage`, the same 10 GB disk as the database) and listed with `GET /shield/captures`; `GET /shield/captures/<record_hash>/photo` returns the JPEG. Only the account that uploaded a photo can list or read it, and there is no administrator route to read one.
-
-- Nothing is stored unless the record's bytes reproduce its hash, the whole uploaded file hashes to the signed `photo_sha256`, and the device signature verifies. Failing uploads are refused with a reason; the phone keeps its copy. Uploading the same record twice is safe.
-- The Apple assertion, when the phone sends one, is checked against the key the account enrolled and the result is stored as `attest` (`verified`, or the reason it could not be). A missing or failed assertion never blocks a photo. Assertions are checked in the order they were made (Apple's counter must rise), so the app uploads oldest first.
-- Limits: `SHIELD_MAX_PHOTO_BYTES` (15 MiB) per photo and `SHIELD_ACCOUNT_QUOTA_MB` (1024) per account. The disk is shared, so size the quota to the number of accounts, and **back up `/data`**: photos live only there and on the phones.
-- What this does not show: who holds the signing key (it is not tied to the account), that the scene is true, or the time beyond the phone's clock.
-- This changes what the app tells people: photos are no longer only on the phone. Update the privacy policy and any "stays on this phone" wording before a public release.
-
-## Outside time-stamp (RFC 3161), off until enabled
-
-Once a day the server sends a time-stamp authority the hash of each account's **chain head** (a stored record that no later record links to; its hash already commits to every record before it) and keeps the signed reply. Only that hash leaves the server: `SHA-256("shield-chain-head-v1|" + record_hash)`. `GET /shield/captures` then shows `outside_time` per photo (`stamped` with the authority's time, `waiting`, or `off`), and `GET /shield/captures/<record_hash>/timestamp` returns the stored reply for the photographer to keep.
-
-- Off unless `SHIELD_TSA_ENABLED=true`. **Setting it changes live behaviour (an outside call once a day) and needs the owner's go.** `SHIELD_TSA_URL` defaults to DigiCert's public service, `http://timestamp.digicert.com`. A failed call is logged and retried on the next run; it never blocks or delays an upload.
-- `SHIELD_TSA_CA_PEM_PATH` (optional): a file of the trusted roots. Without it a reply is still checked (granted; imprint and nonce match; signed attributes bind the time; the signer certificate is a time-stamping certificate valid at that time; the signature verifies) but the stamp says `chain_checked: false`, because nothing says which roots to trust. Nothing in this repo bundles DigiCert's roots: get them from DigiCert and put the file on the disk.
-- What a stamp shows: the authority says the chain up to that head existed by its time. It does not show who made a photo, that the scene is true, or when it was taken (only an upper bound). A record stored after the last run reads `waiting`.
-- Anyone can check a kept reply without Shield: `openssl ts -verify -in reply.tsr -digest <imprint_sha256> -CAfile roots.pem` (save `reply_der_b64` decoded as `reply.tsr`). The same command is used on the OpenSSL-made fixture in `server/tests/vectors/tsa/`.
-- Not verified from here: a live call to DigiCert (cloud sessions cannot reach it). Check the first run in Render's logs ("Outside time-stamp ..." warnings mean a head was not stamped) before relying on it.
-
-## Checking a photo against the stored copy (share codes)
-
-Someone who needs a photo checked (an inspector, a lender) can compare it with the copy Shield stored, with no account, if the photographer gives them a **share code** and the **original file**.
-
-- The photographer makes a code for one uploaded photo: `POST /shield/captures/<record_hash>/share` (`{"days": 1-90}`, default 30). The code is 26 random characters, shown once, kept only as an HMAC, expires, and can be withdrawn with `DELETE /shield/shares/<id>`. `GET /shield/captures/<record_hash>/shares` lists the photographer's codes (never the codes themselves).
-- The checker opens `/check` (or posts to `POST /shield/v1/compare` with `code` and `photo`). The link may carry the code in its `#fragment`, which no server ever receives.
-- **Private to the photographer:** a wrong, expired or withdrawn code, and a file with no code, all answer the same `404 not_found`. Nothing is revealed without a code. The file is read in memory and dropped.
-- **The answer is facts only:** matched or not; the upload time on Shield's clock; whether the stored photo is unchanged and the record's device signature verifies; the Apple device-check result as stored; and, about the uploader, only whether the account passed the photo-ID and selfie check and on what day (`passed`, `test_mode` or `not_verified`). No name, account id, location, note or image.
-- Each check is appended to a hash-chained log (`compare_log`, the older custody-chain code): share id, result and time only. No file, no address.
-- **Limits:** only uploaded photos can be compared. A copy sent by email or a messaging app is usually recompressed and will not match, so the checker page and every no-match answer say to use the original file, sent as a file or attachment. A match does not show the scene is true, who held the signing key (it is not tied to the account), or when the photo was taken. A global cap of 600 checks an hour guards against floods; the per-address limiter may see only Render's proxy address (not checked).
-- Merkle proofs over uploaded records are planned as a second stage; they are not built.
+## Features
+One file per feature in `docs/features/` (forgot password, stored photos, outside time-stamp, server job ticket, and so on): what it does, the settings that control it, what it shows and does not show, and what has not been verified. A new feature adds its own file there; this page keeps only the setup, the platform steps and the release gates, so two features do not edit the same lines.
 
 ## iOS
 Open `ios/ShieldCamera/ShieldCamera.xcodeproj`, set the production bundle/team and HTTPS API URL, and archive with the owner's distribution certificate and provisioning profile. The Debug configuration uses the development App Attest entitlement; Release uses `ShieldCameraProduction.entitlements` with the production environment. Match `SHIELD_APP_ID` to the signing team's ID and bundle identifier. The app signs into Shield and keeps the access token in memory for that session. No gallery entitlement or picker is used. Validate the Swift build and a physical-device production assertion before release.

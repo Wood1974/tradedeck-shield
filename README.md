@@ -6,7 +6,7 @@ This package carries the Shield evidence system through Sections 1–22 at sourc
 
 ## Two ways a photo reaches this server
 
-1. **The phone app (current).** `shield-app/` in `Wood1974/Tradeneck` seals each photo on the phone (SHA-256, hash chain, device signature) with no signal, then uploads the signed record and the original JPEG to `POST /shield/captures` when signed in with signal. The server checks it and stores it for that account only. See `docs/PRODUCTION_DEPLOYMENT.md` ("Stored photos").
+1. **The phone app (current).** `shield-app/` in `Wood1974/Tradeneck` seals each photo on the phone (SHA-256, hash chain, device signature) with no signal, then uploads the signed record and the original JPEG to `POST /shield/captures` when signed in with signal. The server checks it and stores it for that account only. See `docs/features/stored-photos.md`.
 2. **The server-driven evidence pipeline (Sections 1-22, below).** A client asks for a challenge, uploads the photo with a typed note, and the server seals it through a state machine with custody events. The older native clients in `ios/` and `android/` were built for this. It is implemented and tested on the server. The current app uses only its App Attest enrolment routes (`/shield/attest/challenge`, `/shield/attest`), not the job challenge, photo upload, state machine or custody routes.
 
 The protocol text that follows describes the second pipeline.
