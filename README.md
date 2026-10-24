@@ -15,6 +15,9 @@ Core protocol: native camera only; exact original JPEG hashing; required human a
 
 Standalone mode has Shield-owned accounts and explicit job/point grants in the local persistent database. Supabase and the TradeDeck API are not needed for this mode. The original integration code remains available but is not enabled by the standalone `render.yaml`.
 
+## Checking a photo against the stored copy
+`/check` (and `POST /shield/v1/compare`) compares a submitted original file with the copy Shield stored, using a share code the photographer made. See `docs/PRODUCTION_DEPLOYMENT.md`.
+
 ## Run locally
 ```bash
 cd server
