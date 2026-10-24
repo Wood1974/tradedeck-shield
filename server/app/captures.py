@@ -32,6 +32,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from . import outside_time
+from . import time_audit
 from .local_identity import LocalIdentity
 
 RECORD_VERSION = 1
@@ -150,9 +151,15 @@ def _init(local: LocalIdentity) -> None:
             record_json TEXT NOT NULL, signature_der_b64 TEXT NOT NULL, public_key_b64 TEXT NOT NULL,
             attest_key_id TEXT, attest_status TEXT NOT NULL, attest_trusted INTEGER NOT NULL DEFAULT 0,
             received_at REAL NOT NULL,
+            time_label TEXT, time_notes TEXT,
             UNIQUE(account_id, record_hash)
           );
         """)
+        # A table made before the clock check existed has no such columns; its rows keep NULL, shown as NOT CHECKED.
+        have = {row[1] for row in db.execute("PRAGMA table_info(captures)").fetchall()}
+        for column in ("time_label", "time_notes"):
+            if column not in have:
+                db.execute(f"ALTER TABLE captures ADD COLUMN {column} TEXT")
 
 
 def _photo_path(account_id: str, record_hash: str) -> Path:
@@ -166,6 +173,8 @@ def _view(row, cover: dict | None = None) -> dict:
         "photo_sha256": row["photo_sha256"], "bytes": row["photo_bytes"], "received_at": row["received_at"],
         "integrity": "verified",
         "attest": {"status": row["attest_status"], "trusted": bool(row["attest_trusted"])},
+        "time": {"label": row["time_label"] or time_audit.NOT_CHECKED,
+                 "notes": json.loads(row["time_notes"]) if row["time_notes"] else (["stored before the clock check existed"] if not row["time_label"] else [])},
         "outside_time": outside_time.view(cover),
     }
 
@@ -209,20 +218,25 @@ def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict) -> dic
     else:
         attest_status, trusted = "none", False
 
+    now = time.time()
+    with local.db() as db:
+        before = db.execute("SELECT record_json FROM captures WHERE account_id=? AND record_hash=?", (account_id, prev_hash)).fetchone()
+    # Never blocks a photo: the result is stored beside it, like the Apple check.
+    clock = time_audit.assess(record, json.loads(before["record_json"]) if before else None, int(now * 1000))
+
     path = _photo_path(account_id, rec_hash)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(".part")
     temp.write_bytes(photo)
     os.replace(temp, path)
-    now = time.time()
     row_id = str(uuid.uuid4())
     try:
         with local.db() as db:
             db.execute(
                 "INSERT INTO captures(id,account_id,record_hash,prev_hash,ticket_id,checkpoint_id,photo_sha256,photo_bytes,record_json,"
-                "signature_der_b64,public_key_b64,attest_key_id,attest_status,attest_trusted,received_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "signature_der_b64,public_key_b64,attest_key_id,attest_status,attest_trusted,received_at,time_label,time_notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (row_id, account_id, rec_hash, prev_hash, record["ticket_id"], record["checkpoint_id"], record["photo_sha256"], len(photo),
-                 json.dumps(record, sort_keys=True), signature, public_key, key_id, attest_status, int(trusted), now))
+                 json.dumps(record, sort_keys=True), signature, public_key, key_id, attest_status, int(trusted), now, clock["label"], json.dumps(clock["notes"])))
             row = db.execute("SELECT * FROM captures WHERE id=?", (row_id,)).fetchone()
     except Exception:
         path.unlink(missing_ok=True)
