@@ -25,6 +25,7 @@ import json
 import os
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature
@@ -32,7 +33,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from . import outside_time
-from . import time_audit
+from . import tickets, time_audit
 from .local_identity import LocalIdentity
 
 RECORD_VERSION = 1
@@ -151,13 +152,13 @@ def _init(local: LocalIdentity) -> None:
             record_json TEXT NOT NULL, signature_der_b64 TEXT NOT NULL, public_key_b64 TEXT NOT NULL,
             attest_key_id TEXT, attest_status TEXT NOT NULL, attest_trusted INTEGER NOT NULL DEFAULT 0,
             received_at REAL NOT NULL,
-            time_label TEXT, time_notes TEXT,
+            time_label TEXT, time_notes TEXT, ticket_hash TEXT,
             UNIQUE(account_id, record_hash)
           );
         """)
         # A table made before the clock check existed has no such columns; its rows keep NULL, shown as NOT CHECKED.
         have = {row[1] for row in db.execute("PRAGMA table_info(captures)").fetchall()}
-        for column in ("time_label", "time_notes"):
+        for column in ("time_label", "time_notes", "ticket_hash"):
             if column not in have:
                 db.execute(f"ALTER TABLE captures ADD COLUMN {column} TEXT")
 
@@ -167,7 +168,7 @@ def _photo_path(account_id: str, record_hash: str) -> Path:
     return storage_root() / account_id / f"{record_hash}.jpg"
 
 
-def _view(row, cover: dict | None = None) -> dict:
+def _view(row, ticket: dict | None = None, cover: dict | None = None) -> dict:
     return {
         "id": row["id"], "record_hash": row["record_hash"], "ticket_id": row["ticket_id"], "checkpoint_id": row["checkpoint_id"],
         "photo_sha256": row["photo_sha256"], "bytes": row["photo_bytes"], "received_at": row["received_at"],
@@ -175,6 +176,7 @@ def _view(row, cover: dict | None = None) -> dict:
         "attest": {"status": row["attest_status"], "trusted": bool(row["attest_trusted"])},
         "time": {"label": row["time_label"] or time_audit.NOT_CHECKED,
                  "notes": json.loads(row["time_notes"]) if row["time_notes"] else (["stored before the clock check existed"] if not row["time_label"] else [])},
+        "ticket": ticket or {"origin": "local"},
         "outside_time": outside_time.view(cover),
     }
 
@@ -205,7 +207,7 @@ def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict) -> dic
     with local.db() as db:
         existing = db.execute("SELECT * FROM captures WHERE account_id=? AND record_hash=?", (account_id, rec_hash)).fetchone()
         if existing:
-            return {**_view(existing), "already": True}
+            return {**_view(existing, ticket_view(local, account_id, existing["ticket_hash"])), "already": True}
         used = db.execute("SELECT COALESCE(SUM(photo_bytes),0) FROM captures WHERE account_id=?", (account_id,)).fetchone()[0]
         if used + len(photo) > quota_bytes():
             raise Refused("quota_exceeded")
@@ -220,9 +222,16 @@ def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict) -> dic
 
     now = time.time()
     with local.db() as db:
-        before = db.execute("SELECT record_json FROM captures WHERE account_id=? AND record_hash=?", (account_id, prev_hash)).fetchone()
+        before = db.execute("SELECT record_json, ticket_hash FROM captures WHERE account_id=? AND record_hash=?", (account_id, prev_hash)).fetchone()
+    # A chain's first photo links to a server ticket when it was started with one: that ticket (for the same ticket id)
+    # anchors the chain and its clock is the baseline. Later photos inherit the anchor from the record before them.
+    started = tickets.by_hash(local, account_id, prev_hash)
+    if started and started["ticket_id"] != record["ticket_id"]:
+        started = None
+    anchor = started["ticket_hash"] if started else (before["ticket_hash"] if before else None)
+    baseline = started["clock"] if started else (json.loads(before["record_json"]) if before else None)
     # Never blocks a photo: the result is stored beside it, like the Apple check.
-    clock = time_audit.assess(record, json.loads(before["record_json"]) if before else None, int(now * 1000))
+    clock = time_audit.assess(record, baseline, int(now * 1000))
 
     path = _photo_path(account_id, rec_hash)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -234,14 +243,23 @@ def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict) -> dic
         with local.db() as db:
             db.execute(
                 "INSERT INTO captures(id,account_id,record_hash,prev_hash,ticket_id,checkpoint_id,photo_sha256,photo_bytes,record_json,"
-                "signature_der_b64,public_key_b64,attest_key_id,attest_status,attest_trusted,received_at,time_label,time_notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "signature_der_b64,public_key_b64,attest_key_id,attest_status,attest_trusted,received_at,time_label,time_notes,ticket_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (row_id, account_id, rec_hash, prev_hash, record["ticket_id"], record["checkpoint_id"], record["photo_sha256"], len(photo),
-                 json.dumps(record, sort_keys=True), signature, public_key, key_id, attest_status, int(trusted), now, clock["label"], json.dumps(clock["notes"])))
+                 json.dumps(record, sort_keys=True), signature, public_key, key_id, attest_status, int(trusted), now, clock["label"], json.dumps(clock["notes"]), anchor))
             row = db.execute("SELECT * FROM captures WHERE id=?", (row_id,)).fetchone()
     except Exception:
         path.unlink(missing_ok=True)
         raise
-    return {**_view(row), "already": False}
+    return {**_view(row, ticket_view(local, account_id, anchor)), "already": False}
+
+
+def ticket_view(local: LocalIdentity, account_id: str, ticket_hash: str | None) -> dict:
+    """Whether a server-signed ticket anchors this record's chain, and the window it started in."""
+    started = tickets.by_hash(local, account_id, ticket_hash) if ticket_hash else None
+    if not started:
+        return {"origin": "local"}
+    iso = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).isoformat()
+    return {"origin": "server", "after": iso(started["server_time_ms"]), "before": iso(started["countersigned_at_ms"])}
 
 
 def list_for(local: LocalIdentity, account_id: str, limit: int = 200) -> list[dict]:
@@ -249,7 +267,7 @@ def list_for(local: LocalIdentity, account_id: str, limit: int = 200) -> list[di
     with local.db() as db:
         rows = db.execute("SELECT * FROM captures WHERE account_id=? ORDER BY received_at DESC LIMIT ?", (account_id, limit)).fetchall()
     cover = outside_time.coverage(local, account_id)
-    return [_view(r, cover.get(r["record_hash"])) for r in rows]
+    return [_view(r, ticket_view(local, account_id, r["ticket_hash"]), cover.get(r["record_hash"])) for r in rows]
 
 
 def read_photo(local: LocalIdentity, account_id: str, record_hash: str) -> bytes | None:

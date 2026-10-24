@@ -37,6 +37,7 @@ Standing instructions from the owner. They apply to every session in this repo, 
 ## Running it
 
 - Tests: `cd server && python -m pytest` (install `requirements.txt` plus `pytest` and `httpx`). Run them before any push.
+- Server tickets (`app/tickets.py`) are closed until `SHIELD_TICKET_SIGNING_KEY_PEM` is set; the key is a secret only the owner creates and sets on Render.
 - Outside time-stamps (`app/outside_time.py`, `app/rfc3161.py`) are off unless `SHIELD_TSA_ENABLED=true`; turning it on is a live change for the owner to approve. Tests use a reply made by OpenSSL (`server/tests/vectors/tsa/`).
 - Cloud sessions can't call the live server (the egress proxy refuses it). Check the live server through Render's logs and the dashboard, not `curl`.
 
