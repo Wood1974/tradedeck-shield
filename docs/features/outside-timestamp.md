@@ -1,0 +1,11 @@
+# Outside time-stamp (RFC 3161), off until enabled
+
+Once a day the server sends a time-stamp authority the hash of each account's **chain head** (a stored record that no later record links to; its hash already commits to every record before it) and keeps the signed reply. Only that hash leaves the server: `SHA-256("shield-chain-head-v1|" + record_hash)`. `GET /shield/captures` then shows `outside_time` per photo (`stamped` with the authority's time, `waiting`, or `off`), and `GET /shield/captures/<record_hash>/timestamp` returns the stored reply for the photographer to keep.
+
+- Off unless `SHIELD_TSA_ENABLED=true`. **Setting it changes live behaviour (an outside call once a day) and needs the owner's go.** `SHIELD_TSA_URL` defaults to DigiCert's public service, `http://timestamp.digicert.com`. A failed call is logged and retried on the next run; it never blocks or delays an upload.
+- `SHIELD_TSA_CA_PEM_PATH` (optional): a file of the trusted roots. Without it a reply is still checked (granted; imprint and nonce match; signed attributes bind the time; the signer certificate is a time-stamping certificate valid at that time; the signature verifies) but the stamp says `chain_checked: false`, because nothing says which roots to trust. Nothing in this repo bundles DigiCert's roots: get them from DigiCert and put the file on the disk.
+- What a stamp shows: the authority says the chain up to that head existed by its time. It does not show who made a photo, that the scene is true, or when it was taken (only an upper bound). A record stored after the last run reads `waiting`.
+- Anyone can check a kept reply without Shield: `openssl ts -verify -in reply.tsr -digest <imprint_sha256> -CAfile roots.pem` (save `reply_der_b64` decoded as `reply.tsr`). The same command is used on the OpenSSL-made fixture in `server/tests/vectors/tsa/`.
+- Not verified from here: a live call to DigiCert (cloud sessions cannot reach it). Check the first run in Render's logs ("Outside time-stamp ..." warnings mean a head was not stamped) before relying on it.
+
+Outside time-stamps (`app/outside_time.py`, `app/rfc3161.py`) are off unless `SHIELD_TSA_ENABLED=true`; turning it on is a live change for the owner to approve. Tests use a reply made by OpenSSL (`server/tests/vectors/tsa/`).
