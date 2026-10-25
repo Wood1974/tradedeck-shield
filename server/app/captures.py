@@ -34,7 +34,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from . import outside_time
 from . import tickets, time_audit
-from .local_identity import LocalIdentity
+from .local_identity import LocalIdentity, init_once
 
 RECORD_VERSION = 1
 JS_SAFE_INT = 2 ** 53 - 1
@@ -141,6 +141,7 @@ def storage_root() -> Path:
     return Path(os.getenv("SHIELD_STORAGE_ROOT", "./storage")) / "captures"
 
 
+@init_once
 def _init(local: LocalIdentity) -> None:
     with local.db() as db:
         db.executescript("""
@@ -155,6 +156,7 @@ def _init(local: LocalIdentity) -> None:
             time_label TEXT, time_notes TEXT, ticket_hash TEXT,
             UNIQUE(account_id, record_hash)
           );
+          CREATE INDEX IF NOT EXISTS captures_account_received ON captures(account_id, received_at DESC);
         """)
         # A table made before the clock check existed has no such columns; its rows keep NULL, shown as NOT CHECKED.
         have = {row[1] for row in db.execute("PRAGMA table_info(captures)").fetchall()}
@@ -253,9 +255,11 @@ def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict) -> dic
     return {**_view(row, ticket_view(local, account_id, anchor)), "already": False}
 
 
-def ticket_view(local: LocalIdentity, account_id: str, ticket_hash: str | None) -> dict:
-    """Whether a server-signed ticket anchors this record's chain, and the window it started in."""
-    started = tickets.by_hash(local, account_id, ticket_hash) if ticket_hash else None
+def ticket_view(local: LocalIdentity, account_id: str, ticket_hash: str | None, started: dict | None = None) -> dict:
+    """Whether a server-signed ticket anchors this record's chain, and the window it started in.
+    `started` is the already looked-up start (list_for finds them all in one query); without it this looks it up."""
+    if started is None and ticket_hash:
+        started = tickets.by_hash(local, account_id, ticket_hash)
     if not started:
         return {"origin": "local"}
     iso = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).isoformat()
@@ -267,7 +271,8 @@ def list_for(local: LocalIdentity, account_id: str, limit: int = 200) -> list[di
     with local.db() as db:
         rows = db.execute("SELECT * FROM captures WHERE account_id=? ORDER BY received_at DESC LIMIT ?", (account_id, limit)).fetchall()
     cover = outside_time.coverage(local, account_id)
-    return [_view(r, ticket_view(local, account_id, r["ticket_hash"]), cover.get(r["record_hash"])) for r in rows]
+    starts = tickets.by_hashes(local, account_id, [r["ticket_hash"] for r in rows])
+    return [_view(r, ticket_view(local, account_id, r["ticket_hash"], starts.get(r["ticket_hash"])), cover.get(r["record_hash"])) for r in rows]
 
 
 def read_photo(local: LocalIdentity, account_id: str, record_hash: str) -> bytes | None:
