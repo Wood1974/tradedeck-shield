@@ -275,6 +275,14 @@ def list_for(local: LocalIdentity, account_id: str, limit: int = 200) -> list[di
     return [_view(r, ticket_view(local, account_id, r["ticket_hash"], starts.get(r["ticket_hash"])), cover.get(r["record_hash"])) for r in rows]
 
 
+def photos_per_phone_key(local: LocalIdentity, account_id: str) -> dict[str, int]:
+    """How many of this account's stored photos each App Attest key signed for (the key id the phone sent with the upload)."""
+    _init(local)
+    with local.db() as db:
+        rows = db.execute("SELECT attest_key_id, COUNT(*) AS n FROM captures WHERE account_id=? AND attest_key_id IS NOT NULL GROUP BY attest_key_id", (account_id,)).fetchall()
+    return {r["attest_key_id"]: r["n"] for r in rows}
+
+
 def read_photo(local: LocalIdentity, account_id: str, record_hash: str) -> bytes | None:
     """The stored JPEG for this account's record, or None. Raises Refused('stored_photo_corrupt') if the file changed."""
     if not _is_hex64(record_hash):

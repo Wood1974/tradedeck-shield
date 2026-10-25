@@ -32,7 +32,7 @@ class Store:
             );
             CREATE TABLE IF NOT EXISTS attestation_keys(
               key_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, public_key_der_b64 TEXT NOT NULL,
-              environment TEXT NOT NULL, counter INTEGER NOT NULL DEFAULT 0, receipt_b64 TEXT, created_at REAL NOT NULL
+              environment TEXT NOT NULL, counter INTEGER NOT NULL DEFAULT 0, receipt_b64 TEXT, created_at REAL NOT NULL, revoked_at REAL
             );
             CREATE TABLE IF NOT EXISTS attestation_challenges(
               nonce TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires_at REAL NOT NULL, used_at REAL
@@ -51,6 +51,8 @@ class Store:
             );
             ''')
             try: c.execute("ALTER TABLE custody_events ADD COLUMN event_hash TEXT")
+            except sqlite3.OperationalError: pass
+            try: c.execute("ALTER TABLE attestation_keys ADD COLUMN revoked_at REAL")
             except sqlite3.OperationalError: pass
 
     def attestation_challenge(self, account_id, ttl):
@@ -72,8 +74,11 @@ class Store:
 
     def save_attestation_key(self, key_id, account_id, public_key_der_b64, environment, receipt_b64):
         with self.db() as c:
-            existing = c.execute("SELECT account_id, public_key_der_b64 FROM attestation_keys WHERE key_id=?", (key_id,)).fetchone()
+            existing = c.execute("SELECT account_id, public_key_der_b64, revoked_at FROM attestation_keys WHERE key_id=?", (key_id,)).fetchone()
             if existing:
+                # A withdrawn phone key stays withdrawn: enrolling it again would undo the owner's revoke.
+                if existing["revoked_at"] is not None:
+                    raise ValueError("attestation_key_revoked")
                 if existing["account_id"] != account_id or existing["public_key_der_b64"] != public_key_der_b64:
                     raise ValueError("attestation_key_already_bound")
                 return
@@ -83,6 +88,19 @@ class Store:
     def get_attestation_key(self, key_id):
         with self.db() as c:
             return c.execute("SELECT * FROM attestation_keys WHERE key_id=?",(key_id,)).fetchone()
+
+    def list_attestation_keys(self, account_id):
+        with self.db() as c:
+            return c.execute("SELECT key_id,environment,counter,created_at,revoked_at FROM attestation_keys WHERE account_id=? ORDER BY created_at", (account_id,)).fetchall()
+
+    def revoke_attestation_key(self, key_id, account_id):
+        """Withdraw one of this account's phone keys. True when it now is withdrawn (also when it already was); False when it is not this account's."""
+        with self.db() as c:
+            row = c.execute("SELECT revoked_at FROM attestation_keys WHERE key_id=? AND account_id=?", (key_id, account_id)).fetchone()
+            if not row: return False
+            if row["revoked_at"] is None:
+                c.execute("UPDATE attestation_keys SET revoked_at=? WHERE key_id=? AND account_id=? AND revoked_at IS NULL", (time.time(), key_id, account_id))
+            return True
 
     def update_attestation_counter(self, key_id, counter):
         with self.db() as c:
