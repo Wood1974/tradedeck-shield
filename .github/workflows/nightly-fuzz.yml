@@ -1,0 +1,23 @@
+name: shield-nightly-fuzz
+# Damages uploads at random and checks the server never errors and never stores what the independent verifier rejects.
+# The ordinary CI already runs a small seeded version on every push. This runs many more rounds with a new seed each night
+# and prints the seed, so a failure can be repeated: SHIELD_FUZZ_SEED=<seed> SHIELD_FUZZ_ROUNDS=<rounds> pytest tests/test_ingest_fuzz.py
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r server/requirements.txt
+      - name: Fuzz the upload path
+        run: |
+          export SHIELD_FUZZ_SEED=$(( (GITHUB_RUN_ID + GITHUB_RUN_ATTEMPT) % 1000000007 ))
+          export SHIELD_FUZZ_ROUNDS=20000
+          echo "seed=$SHIELD_FUZZ_SEED rounds=$SHIELD_FUZZ_ROUNDS"
+          cd server && python -m pytest tests/test_ingest_fuzz.py -q
