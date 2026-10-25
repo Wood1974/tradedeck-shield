@@ -7,6 +7,9 @@ from app.main import app
 from app.local_identity import LocalIdentity
 
 
+LIMITED = "/shield/v1/capture-packs"  # a public GET that is rate limited (/health is not)
+
+
 class _Req:
     def __init__(self, xff=None, host="10.0.0.9"):
         self.headers = {"x-forwarded-for": xff} if xff is not None else {}
@@ -45,9 +48,9 @@ def test_callers_behind_one_proxy_get_separate_limits(monkeypatch):
     monkeypatch.setenv("SHIELD_RATE_LIMIT_PER_MINUTE", "2")
     c = TestClient(app, raise_server_exceptions=False)
     for _ in range(2):
-        assert c.get("/health", headers={"X-Forwarded-For": "1.1.1.1"}).status_code == 200
-    assert c.get("/health", headers={"X-Forwarded-For": "1.1.1.1"}).status_code == 429
-    assert c.get("/health", headers={"X-Forwarded-For": "2.2.2.2"}).status_code == 200
+        assert c.get(LIMITED, headers={"X-Forwarded-For": "1.1.1.1"}).status_code == 200
+    assert c.get(LIMITED, headers={"X-Forwarded-For": "1.1.1.1"}).status_code == 429
+    assert c.get(LIMITED, headers={"X-Forwarded-For": "2.2.2.2"}).status_code == 200
 
 
 @pytest.fixture
