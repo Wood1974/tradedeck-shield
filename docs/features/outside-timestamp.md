@@ -9,3 +9,6 @@ Once a day the server sends a time-stamp authority the hash of each account's **
 - Not verified from here: a live call to DigiCert (cloud sessions cannot reach it). Check the first run in Render's logs ("Outside time-stamp ..." warnings mean a head was not stamped) before relying on it.
 
 Outside time-stamps (`app/outside_time.py`, `app/rfc3161.py`) are off unless `SHIELD_TSA_ENABLED=true`; turning it on is a live change for the owner to approve. Tests use a reply made by OpenSSL (`server/tests/vectors/tsa/`).
+
+## Which records a stamp covers
+Recorded once, when the stamp is taken, in `outside_timestamp_cover` (record -> the earliest stamp that covers it), and read by lookup (`outside_time.coverage_for`, one indexed query for the records asked about). Before this, every photo list loaded all of an account's records and walked each stamp's chain, which would also have put account-sized work on the public check page. Stamps taken before the table existed are covered the first time the tables are set up. A record stored after the last stamp is covered by none until the next run (it reads `waiting`). The old walk is kept only as the reference in the tests.

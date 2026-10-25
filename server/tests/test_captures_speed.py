@@ -75,8 +75,7 @@ def test_stamp_coverage_matches_the_plain_walk_on_random_chains(local):
         with local.db() as db:
             for k, head in enumerate(heads):
                 gen = 1000.0 + k
-                db.execute("INSERT INTO outside_timestamps(account_id,head_record_hash,imprint_hex,reply_b64,gen_time,tsa_url,chain_checked,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                           (acct, head, "i" * 64, "r", gen, "http://tsa", 0, gen))
+                outside_time.store_stamp(db, acct, head, "i" * 64, "r", gen, "http://tsa", False, gen)
                 stamps.append({"head": head, "gen": gen})
         got = {k: v["gen_time"] for k, v in outside_time.coverage(local, acct).items()}
         assert got == naive_coverage(prev_of, sorted(stamps, key=lambda s: s["gen"]))

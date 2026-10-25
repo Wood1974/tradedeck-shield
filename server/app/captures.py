@@ -270,7 +270,7 @@ def list_for(local: LocalIdentity, account_id: str, limit: int = 200) -> list[di
     _init(local)
     with local.db() as db:
         rows = db.execute("SELECT * FROM captures WHERE account_id=? ORDER BY received_at DESC LIMIT ?", (account_id, limit)).fetchall()
-    cover = outside_time.coverage(local, account_id)
+    cover = outside_time.coverage_for(local, account_id, [r["record_hash"] for r in rows])
     starts = tickets.by_hashes(local, account_id, [r["ticket_hash"] for r in rows])
     return [_view(r, ticket_view(local, account_id, r["ticket_hash"], starts.get(r["ticket_hash"])), cover.get(r["record_hash"])) for r in rows]
 
