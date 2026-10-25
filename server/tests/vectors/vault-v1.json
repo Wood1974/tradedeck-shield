@@ -1,0 +1,178 @@
+{
+ "_about": "Made by the app's own sealing code and then frozen. If a canonical-format change is intentional, regenerate and update both repos (Tradeneck shield-app/test-vectors and tradedeck-shield server/tests/vectors).",
+ "bundle": {
+  "version": 1,
+  "record": {
+   "id": "33333333-3333-4333-8333-333333333333",
+   "createdAt": "2026-10-04T11:00:00.000Z",
+   "captureKind": "native-camera",
+   "platform": "ios",
+   "jobId": "job-vec-1",
+   "checkpointId": null,
+   "sha256": "6dce3b33dfd0228b982171965594161ca3d76b8814d764edbf3a9f6c6a530601",
+   "prevChain": "0000000000000000000000000000000000000000000000000000000000000000",
+   "bytes": 18,
+   "mime": "image/jpeg",
+   "gps": {
+    "lat": 40.5,
+    "lng": -111.9,
+    "acc": 5,
+    "source": "os"
+   },
+   "pinScore": null,
+   "deviceSealId": "5C787FB5·EA6F5BD2",
+   "attest": {
+    "kind": "app-attest",
+    "boundHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "tokenPresent": true
+   },
+   "attestationId": "55555555-5555-4555-8555-555555555555",
+   "noteSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+   "chainHead": "4d2dea76c0782bdd2e9b482946da822a4a3c2bbcca47521af964c6b4c0cae350",
+   "signature": "OM1Iji50kNEqxYL/AFlSnKbEQTrSOMwoQhNJKo3tl9y45Au5TvOO56RyX5F3rk1bIoTB1Br4ZfaTrsCqn2g2IA=="
+  },
+  "originalB64": "/9j/4AAQSkZJRgAJAgMEBf/Z",
+  "devicePublicKey": "BPYkkArSrzaj5dzsapVxVO1/iIE7hCfpd8lueDVnXq8dkCmfAZyka0tsNprh0FdCeTFiE6qLa5TaNwMZeC7bYV8="
+ },
+ "packet": {
+  "canonicalVersion": 1,
+  "schema": "tradedeck.shield.completion.v3",
+  "closedAt": "2026-10-25T17:52:56.448Z",
+  "closedBy": {
+   "role": "gc"
+  },
+  "job": {
+   "id": "job-vec-1",
+   "title": "Slab ü",
+   "trade": "concrete",
+   "budgetBand": "under15"
+  },
+  "brief": {
+   "role": "gc",
+   "lockedText": "GC brief — slab ü 🚧",
+   "answers": {}
+  },
+  "points": [
+   {
+    "id": "construction-1",
+    "label": "Layout / excavation",
+    "description": "Forms, elevations, and excavation matching the brief before steel.",
+    "code": {
+     "irc": "R402.2",
+     "ibc": null,
+     "name": "Foundation Pour",
+     "topic": "Minimum concrete strength (Table R402.2); inspection before placing: R109.1.1"
+    },
+    "record": {
+     "id": "11111111-1111-4111-8111-111111111111",
+     "createdAt": "2026-10-04T10:00:00.000Z",
+     "captureKind": "native-camera",
+     "platform": "ios",
+     "jobId": "job-vec-1",
+     "checkpointId": "construction-1",
+     "sha256": "27d4db16aaf70bb35dff9311f7304d69e52125f051220eb7e2ed1757d9f547fd",
+     "prevChain": "0000000000000000000000000000000000000000000000000000000000000000",
+     "bytes": 18,
+     "mime": "image/jpeg",
+     "gps": {
+      "lat": 40.760779,
+      "lng": -111.891047,
+      "acc": 4.5,
+      "source": "os"
+     },
+     "pinScore": null,
+     "deviceSealId": "5C787FB5·EA6F5BD2",
+     "attest": {
+      "kind": "app-attest",
+      "boundHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "tokenPresent": true
+     },
+     "chainHead": "77007548a70da80ec939f10efd58f778130e94d3ed6c4e86c8aafa4c67a98bce",
+     "signature": "ZOFX+xeftZKWZZejk/nsEOxzgY0j3d7AYKUiVYolJpPtWeLd5vdDdx8R+V+O9kDW9X8GZyo4WI80onhTDhNxZQ=="
+    }
+   },
+   {
+    "id": "construction-2",
+    "label": "Steel in place",
+    "description": "Rebar or mesh, chairs, and overlaps before pour.",
+    "code": {
+     "irc": "R403.1.3",
+     "ibc": null,
+     "name": "Reinforcement Installation",
+     "topic": "Footing and stem wall reinforcement (seismic design categories D0, D1, D2)"
+    },
+    "record": {
+     "id": "22222222-2222-4222-8222-222222222222",
+     "createdAt": "2026-10-04T10:05:00.000Z",
+     "captureKind": "native-camera",
+     "platform": "ios",
+     "jobId": "job-vec-1",
+     "checkpointId": "construction-2",
+     "sha256": "34b988e98f26f9abc42913312d4a324e2ae6f9d991c3f51cd83791233f19678c",
+     "prevChain": "77007548a70da80ec939f10efd58f778130e94d3ed6c4e86c8aafa4c67a98bce",
+     "bytes": 18,
+     "mime": "image/jpeg",
+     "gps": null,
+     "pinScore": null,
+     "deviceSealId": "5C787FB5·EA6F5BD2",
+     "attest": {
+      "kind": "app-attest",
+      "boundHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "tokenPresent": true
+     },
+     "chainHead": "ee369d576d39a973d90d6876603447e5435c9a674221f570ef80e17a3612f699",
+     "signature": "3FXu6Ox9h31x7IfJ0sD5ZnsrVOIwydmQyRBwVIlAgJASxewDFqrI5POg4I8CtJmNq7eLykjSa4wLHNkjVito5Q=="
+    }
+   },
+   {
+    "id": "construction-3",
+    "label": "Pour",
+    "description": "Placement in progress or immediately after screed — no covered defects.",
+    "code": {
+     "irc": "R402.2",
+     "ibc": null,
+     "name": "Foundation Pour",
+     "topic": "Minimum concrete strength (Table R402.2); inspection before placing: R109.1.1"
+    },
+    "record": null
+   },
+   {
+    "id": "construction-4",
+    "label": "Finish / cure setup",
+    "description": "Finished surface and any specified control joints.",
+    "code": {
+     "irc": "R402.2",
+     "ibc": null,
+     "name": "Foundation Pour",
+     "topic": "Minimum concrete strength (Table R402.2); inspection before placing: R109.1.1"
+    },
+    "record": null
+   },
+   {
+    "id": "construction-5",
+    "label": "Completion",
+    "description": "Stripped forms, grade around work, and the completed element in context.",
+    "code": {
+     "irc": null,
+     "ibc": null,
+     "name": "Site Condition Documentation"
+    },
+    "record": null
+   }
+  ],
+  "counts": {
+   "points": 5,
+   "sealed": 2,
+   "missing": 3
+  },
+  "notes": "Poured; curing",
+  "deviceSealId": "5C787FB5·EA6F5BD2",
+  "devicePublicKey": "BPYkkArSrzaj5dzsapVxVO1/iIE7hCfpd8lueDVnXq8dkCmfAZyka0tsNprh0FdCeTFiE6qLa5TaNwMZeC7bYV8=",
+  "integrity": {
+   "algo": "SHA-256",
+   "canonical": "stableStringify",
+   "hash": "4fc1ff0192e9f7cc43afd540336f9a3a7450b9ae580a23cf64c7d02e01d0344a",
+   "signature": "kyOLcdC9nSO5K62CjqSaQLrunGoPTLSU6tPqil/yLj7Q5y7znp99MkFawm3FTsXeaKJD0xsofk3FSaVQqUv/tA=="
+  }
+ }
+}
