@@ -6,6 +6,7 @@ from app import security
 from app.main import app
 
 ORIGIN = "capacitor://localhost"
+LIMITED = "/shield/v1/capture-packs"  # a public GET that is rate limited (/health is not)
 
 
 @pytest.fixture
@@ -18,8 +19,8 @@ def client(monkeypatch):
 
 def test_over_the_limit_is_a_429_the_phone_can_read(client):
     for _ in range(3):
-        assert client.get("/health", headers={"Origin": ORIGIN}).status_code == 200
-    r = client.get("/health", headers={"Origin": ORIGIN})
+        assert client.get(LIMITED, headers={"Origin": ORIGIN}).status_code == 200
+    r = client.get(LIMITED, headers={"Origin": ORIGIN})
     assert r.status_code == 429
     assert r.json() == {"detail": "rate_limit_exceeded"}
     assert r.headers.get("access-control-allow-origin") == ORIGIN
@@ -27,7 +28,7 @@ def test_over_the_limit_is_a_429_the_phone_can_read(client):
 
 
 def test_the_security_headers_are_still_on_normal_answers(client):
-    r = client.get("/health")
+    r = client.get(LIMITED)
     assert r.status_code == 200
     assert r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["cache-control"] == "no-store"
@@ -35,7 +36,7 @@ def test_the_security_headers_are_still_on_normal_answers(client):
 
 def test_the_limit_is_counted_per_caller_not_globally(client, monkeypatch):
     for _ in range(3):
-        client.get("/health")
-    assert client.get("/health").status_code == 429
+        client.get(LIMITED)
+    assert client.get(LIMITED).status_code == 429
     security._BUCKETS.clear()
-    assert client.get("/health").status_code == 200
+    assert client.get(LIMITED).status_code == 200

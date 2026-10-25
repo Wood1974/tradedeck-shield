@@ -5,6 +5,8 @@ Two separate limits, both held in the server's memory (one instance; a restart o
 - **Per caller, per minute** (`SHIELD_RATE_LIMIT_PER_MINUTE`, 30 on Render, 120 otherwise). Answers `429 rate_limit_exceeded` with CORS headers and `Retry-After: 60`.
 - **Per account, wrong passwords** (`SHIELD_LOGIN_MAX_FAILURES`, default 5 inside 15 minutes). The sixth sign-in for that email answers `429 too_many_login_attempts` with `Retry-After: 900`, even with the right password, until the oldest failure is 15 minutes old. A correct sign-in before the limit clears the count. An email with no account is counted the same way, so the answer never says which emails exist. Tradeoff: someone who knows an email can lock that account out for 15 minutes by guessing wrongly; there is no way to tell them apart from the real owner.
 
+`/health` is not counted (`security.UNLIMITED_PATHS`). Render asks it every 5 seconds, which is 12 a minute from the proxy's address; counted, it used 40% of Render's 30-a-minute allowance for everyone behind that address. Render's logs show those checks arriving from an internal `10.x` address, so the server sees the proxy's address, not the caller's.
+
 ## Who counts as one caller
 Behind a proxy the server sees the proxy's address, so without help every caller shares one bucket (and one phone syncing many photos can use up everyone's limit).
 

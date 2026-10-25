@@ -24,7 +24,13 @@ def client_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+# Render asks /health every few seconds. Counting those against the caller's bucket used most of it: behind the proxy every
+# caller, and the health check itself, is the proxy's one address. The answer is the same fixed few bytes for everyone.
+UNLIMITED_PATHS = frozenset({"/health"})
+
+
 def enforce_rate_limit(request:Request):
+    if request.url.path in UNLIMITED_PATHS: return
     limit=int(os.getenv("SHIELD_RATE_LIMIT_PER_MINUTE","120")); key=client_key(request); now=time.time(); q=_BUCKETS[key]
     while q and q[0]<now-60:q.popleft()
     if len(q)>=limit: raise HTTPException(429,"rate_limit_exceeded")
