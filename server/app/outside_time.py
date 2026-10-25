@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 import httpx
 
 from . import rfc3161
-from .local_identity import LocalIdentity
+from .local_identity import LocalIdentity, init_once
 
 log = logging.getLogger(__name__)
 DAY_S = 86_400
@@ -46,6 +46,7 @@ def _roots():
         return rfc3161.load_roots(f.read())
 
 
+@init_once
 def _init(local: LocalIdentity) -> None:
     with local.db() as db:
         db.executescript("""
@@ -137,7 +138,9 @@ def coverage(local: LocalIdentity, account_id: str) -> dict[str, dict]:
     for s in stamps:  # oldest stamp first, so a record keeps the earliest time that covers it
         h, hops = s["head_record_hash"], 0
         while h in prev and hops < 100_000:
-            out.setdefault(h, {"gen_time": s["gen_time"], "tsa_url": s["tsa_url"], "chain_checked": bool(s["chain_checked"]), "head_record_hash": s["head_record_hash"]})
+            if h in out:
+                break  # an earlier stamp already covered this record and everything before it, so the rest of the walk finds nothing new
+            out[h] = {"gen_time": s["gen_time"], "tsa_url": s["tsa_url"], "chain_checked": bool(s["chain_checked"]), "head_record_hash": s["head_record_hash"]}
             h, hops = prev[h], hops + 1
     return out
 

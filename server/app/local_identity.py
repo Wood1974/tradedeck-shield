@@ -30,6 +30,25 @@ class LocalAccount:
     role: str
 
 
+_INITIALISED: set[tuple[str, str]] = set()
+
+
+def init_once(fn):
+    """Runs a table-creating function once per database file for the life of the process. Each request used to repeat the
+    CREATE TABLE statements (and, per photo in a list, again for every row). A database file swapped while the server runs
+    would not be set up again; restore is already documented as stop the service first (docs/OPERATIONS.md)."""
+    name = f"{fn.__module__}.{fn.__qualname__}"
+    def wrapper(local):
+        key = (local.path, name)
+        if key in _INITIALISED:
+            return
+        fn(local)
+        _INITIALISED.add(key)
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
+
 # scrypt settings by name, stored beside each hash so old ones keep verifying while new ones are stronger.
 # "scrypt-14-8-1" is what every account had before the upgrade (it is also what a NULL column means).
 # "scrypt-15-8-3" (32 MiB) is OWASP's listed equal in strength to N=2^17, r=8, p=1 (128 MiB); the smaller memory matters
@@ -45,7 +64,10 @@ class LocalIdentity:
         if not database_url.startswith("sqlite:///"):
             raise ValueError("local_identity_requires_sqlite_database")
         self.path = database_url.removeprefix("sqlite:///")
-        self._init()
+        key = (self.path, "LocalIdentity._init")
+        if key not in _INITIALISED:
+            self._init()
+            _INITIALISED.add(key)
 
     def db(self):
         connection = sqlite3.connect(self.path, timeout=10)

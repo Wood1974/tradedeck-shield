@@ -27,7 +27,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from .local_identity import LocalIdentity
+from .local_identity import LocalIdentity, init_once
 
 TICKET_VERSION = 1
 TTL_MS = 7 * 24 * 60 * 60 * 1000
@@ -159,6 +159,7 @@ def issue(account_id: str, ticket_id: str, now=now_ms) -> dict:
     return {"ticket": ticket, "ticket_hash": ticket_hash(ticket), "server_signature_der_b64": base64.b64encode(signature).decode("ascii")}
 
 
+@init_once
 def _init(local: LocalIdentity) -> None:
     with local.db() as db:
         db.executescript("""
@@ -212,12 +213,26 @@ def countersign(local: LocalIdentity, account_id: str, body: dict, now=now_ms) -
     return {"ticket_hash": hash_hex, "started": True, "already": False}
 
 
-def by_hash(local: LocalIdentity, account_id: str, hash_hex: str):
-    """The stored start whose ticket hash this is, for this account. None when there is none."""
-    _init(local)
-    with local.db() as db:
-        row = db.execute("SELECT * FROM tickets WHERE account_id=? AND ticket_hash=?", (account_id, hash_hex)).fetchone()
-    if not row:
-        return None
+def _start(row) -> dict:
     return {"ticket_id": row["ticket_id"], "ticket_hash": row["ticket_hash"], "clock": json.loads(row["clock_json"]),
             "server_time_ms": row["server_time_ms"], "countersigned_at_ms": row["countersigned_at_ms"]}
+
+
+def by_hash(local: LocalIdentity, account_id: str, hash_hex: str):
+    """The stored start whose ticket hash this is, for this account. None when there is none."""
+    return by_hashes(local, account_id, [hash_hex]).get(hash_hex)
+
+
+def by_hashes(local: LocalIdentity, account_id: str, hashes) -> dict[str, dict]:
+    """The same lookup for many hashes in one query: ticket hash -> start, for the ones this account has."""
+    wanted = sorted({h for h in hashes if h})
+    if not wanted:
+        return {}
+    _init(local)
+    found: dict[str, dict] = {}
+    with local.db() as db:
+        for i in range(0, len(wanted), 500):  # stays under SQLite's limit on query parameters
+            chunk = wanted[i:i + 500]
+            rows = db.execute(f"SELECT * FROM tickets WHERE account_id=? AND ticket_hash IN ({','.join('?' * len(chunk))})", (account_id, *chunk)).fetchall()
+            found.update({r["ticket_hash"]: _start(r) for r in rows})
+    return found
