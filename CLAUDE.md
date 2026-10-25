@@ -11,7 +11,7 @@ Standing instructions from the owner. They apply to every session in this repo, 
 - **Fix the root cause, once.** No workarounds or "for now" patches. If the real fix is bigger than asked, say so and propose it.
 - **Always fix the cause; don't append.** If a change would add to a shared list, file or section that other work also edits, give it its own file instead. When the same conflict or error comes back, fix what makes it repeat, not just this instance.
 - **Say what was verified and what wasn't.** Never overstate. If something couldn't be run or checked (a device, a live server, a dashboard), say that plainly.
-- **The owner merges.** Open PRs as drafts and leave them. Don't merge, and don't start TestFlight or store builds or change live settings (Render env vars, DNS, Stripe, Apple) without the owner's go.
+- **The owner merges.** Open PRs as drafts and leave them. Don't merge, and don't start TestFlight or store builds or change live settings (Render env vars, DNS, Stripe, Apple) without the owner's go. One exception (owner's word, Oct 2026): PRs you build from the agreed Shield improvements list may be merged when their real checks pass and they have no conflicts; tell the owner after each merge. Never the admin launch lock, a PR you did not build, or anything the owner has not agreed to.
 - **Don't watch PRs.** Opening a PR subscribes the session automatically; unsubscribe right away. Check CI only when asked.
 - **Decide before building** anything that changes who can see data, what leaves the phone, or what costs money: ask first, with a recommendation.
 - **Never print or repeat a password, key or token.** If one has been exposed (in chat, a screenshot, a log), say so plainly so it gets rotated.
