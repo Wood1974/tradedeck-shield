@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging, os
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from .store import Store
@@ -30,6 +30,20 @@ async def _json_500(request, call_next):
         logging.getLogger(__name__).exception("Unhandled error on %s %s", request.method, request.url.path)
         return JSONResponse({"error": "internal_error"}, status_code=500)
 
+@app.middleware("http")
+async def security_middleware(request:Request,call_next):
+    # Registered before CORS so it sits inside it, and answering here instead of raising: an HTTPException raised in this
+    # layer is never turned into a response, so going over the limit came out as a bare 500 with no CORS headers, which the
+    # phone's web view reports only as "network".
+    try: enforce_rate_limit(request)
+    except HTTPException as exc:
+        return JSONResponse({"detail":exc.detail},status_code=exc.status_code,headers={"Retry-After":"60","X-Content-Type-Options":"nosniff","Cache-Control":"no-store"})
+    response=await call_next(request)
+    response.headers["X-Content-Type-Options"]="nosniff"
+    response.headers["Referrer-Policy"]="no-referrer"
+    response.headers["Cache-Control"]="no-store"
+    return response
+
 # The phone app's web view calls this API from its own origin (iOS capacitor://localhost, Android https://localhost).
 # Without these the browser blocks the request at the preflight. Bearer tokens, not cookies, so no credentials mode.
 app.add_middleware(CORSMiddleware,
@@ -53,14 +67,3 @@ def _bootstrap_first_admin():
             if ensure_bootstrap_admin(): logging.getLogger(__name__).warning("Created the first Shield administrator from the bootstrap variables; remove them now")
         except (ValueError, RuntimeError):
             logging.getLogger(__name__).exception("Bootstrap administrator could not be created")
-
-
-@app.middleware("http")
-async def security_middleware(request:Request,call_next):
-    enforce_rate_limit(request)
-    response=await call_next(request)
-    response.headers["X-Content-Type-Options"]="nosniff"
-    response.headers["Referrer-Policy"]="no-referrer"
-    response.headers["Cache-Control"]="no-store"
-    return response
-
