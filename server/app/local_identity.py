@@ -30,6 +30,16 @@ class LocalAccount:
     role: str
 
 
+# scrypt settings by name, stored beside each hash so old ones keep verifying while new ones are stronger.
+# "scrypt-14-8-1" is what every account had before the upgrade (it is also what a NULL column means).
+# "scrypt-15-8-3" (32 MiB) is OWASP's listed equal in strength to N=2^17, r=8, p=1 (128 MiB); the smaller memory matters
+# because each sign-in holds it while it runs and the server has 512 MB.
+KDF_PARAMS = {"scrypt-14-8-1": (2**14, 8, 1), "scrypt-15-8-3": (2**15, 8, 3)}
+LEGACY_KDF = "scrypt-14-8-1"
+CURRENT_KDF = "scrypt-15-8-3"
+MAX_SCRYPT_MEMORY = 64 * 1024 * 1024
+
+
 class LocalIdentity:
     def __init__(self, database_url: str):
         if not database_url.startswith("sqlite:///"):
@@ -52,7 +62,8 @@ class LocalIdentity:
                 role TEXT NOT NULL CHECK (role IN ('admin','capturer')),
                 active INTEGER NOT NULL DEFAULT 1,
                 auth_version INTEGER NOT NULL DEFAULT 1,
-                created_at REAL NOT NULL
+                created_at REAL NOT NULL,
+                password_kdf TEXT
               );
               CREATE TABLE IF NOT EXISTS local_job_grants (
                 account_id TEXT NOT NULL REFERENCES local_accounts(id),
@@ -62,10 +73,14 @@ class LocalIdentity:
                 PRIMARY KEY(account_id,job_id,point_id)
               );
             """)
+            # A table made before the upgrade has no kdf column; its rows keep NULL, meaning the legacy setting.
+            if "password_kdf" not in {row[1] for row in db.execute("PRAGMA table_info(local_accounts)").fetchall()}:
+                db.execute("ALTER TABLE local_accounts ADD COLUMN password_kdf TEXT")
 
     @staticmethod
-    def _digest(password: str, salt: bytes) -> str:
-        return hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1).hex()
+    def _digest(password: str, salt: bytes, kdf: str = CURRENT_KDF) -> str:
+        n, r, p = KDF_PARAMS[kdf]
+        return hashlib.scrypt(password.encode("utf-8"), salt=salt, n=n, r=r, p=p, maxmem=MAX_SCRYPT_MEMORY).hex()
 
     def create_account(self, email: str, password: str, role: str = "capturer") -> LocalAccount:
         email = email.strip().lower()
@@ -79,8 +94,8 @@ class LocalIdentity:
         account = LocalAccount(str(uuid.uuid4()), email, role)
         try:
             with self.db() as db:
-                db.execute("INSERT INTO local_accounts(id,email,password_salt,password_hash,role,created_at) VALUES(?,?,?,?,?,?)",
-                           (account.id,email,salt.hex(),self._digest(password,salt),role,time.time()))
+                db.execute("INSERT INTO local_accounts(id,email,password_salt,password_hash,password_kdf,role,created_at) VALUES(?,?,?,?,?,?,?)",
+                           (account.id,email,salt.hex(),self._digest(password,salt),CURRENT_KDF,role,time.time()))
         except sqlite3.IntegrityError as exc:
             raise ValueError("account_already_exists") from exc
         return account
@@ -88,12 +103,22 @@ class LocalIdentity:
     def authenticate(self, email: str, password: str) -> LocalAccount | None:
         with self.db() as db:
             row = db.execute("SELECT * FROM local_accounts WHERE email=?", (email.strip().lower(),)).fetchone()
-        # Perform the same expensive hash even for unknown accounts.
+        # Every attempt does the same work, a known account or not: one hash at the legacy setting and one at the current
+        # one. The one that checks the password is the account's own; the other is thrown away, or is the upgrade.
         salt = bytes.fromhex(row["password_salt"]) if row else b"\0" * 16
+        kdf = (row["password_kdf"] or LEGACY_KDF) if row else CURRENT_KDF
         expected = row["password_hash"] if row else "0" * 64
-        valid = hmac.compare_digest(self._digest(password, salt), expected)
+        legacy = self._digest(password, salt, LEGACY_KDF)
+        current = self._digest(password, salt, CURRENT_KDF)
+        valid = hmac.compare_digest(legacy if kdf == LEGACY_KDF else current, expected)
         if not row or not valid or not row["active"]:
             return None
+        if kdf != CURRENT_KDF:
+            # Same password, same salt, stronger setting. Only if the stored hash is still the one just checked, so a
+            # password reset that landed in between is never overwritten. Does not touch auth_version: it is the same password.
+            with self.db() as db:
+                db.execute("UPDATE local_accounts SET password_hash=?,password_kdf=? WHERE id=? AND password_hash=?",
+                           (current, CURRENT_KDF, row["id"], row["password_hash"]))
         return LocalAccount(row["id"], row["email"], row["role"])
 
     @staticmethod
@@ -170,9 +195,9 @@ class LocalIdentity:
             raise ValueError("password_length_invalid")
         salt = secrets.token_bytes(16)
         with self.db() as db:
-            changed = db.execute("""UPDATE local_accounts SET password_salt=?,password_hash=?,auth_version=auth_version+1
+            changed = db.execute("""UPDATE local_accounts SET password_salt=?,password_hash=?,password_kdf=?,auth_version=auth_version+1
                                      WHERE id=? AND active=1""",
-                                 (salt.hex(),self._digest(password,salt),account_id)).rowcount
+                                 (salt.hex(),self._digest(password,salt),CURRENT_KDF,account_id)).rowcount
         if not changed:
             raise ValueError("account_not_found")
 
