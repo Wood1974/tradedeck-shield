@@ -60,6 +60,18 @@ ul{padding-left:20px}li{margin:4px 0}
       n.push(el('p',u.id_check==='passed'?'The account that uploaded it passed a photo-ID and selfie check on '+u.on+(u.before_upload?'.':' (after this upload).'):u.id_check==='test_mode'?'The uploading account’s ID check was a test, not a real ID check.':'The account that uploaded it has not passed an ID check.'));
       var dc=d.device_check||{};
       n.push(el('p','Apple device check: '+(dc.status==='verified'?'verified by the server':'not verified ('+dc.detail+')')));
+      var t=d.timing;
+      if(t){
+        var CLOCK={'CONSISTENT':'The phone’s own clocks agree with each other. This is a consistency check, not a timestamp.',
+          'UNVERIFIED TIME':'The phone’s clocks could not be compared (for example, the phone restarted). That is not a sign of tampering.',
+          'DEVICE CLOCK MISMATCH':'The phone’s clocks disagreed with each other, or with the server’s, by more than two minutes.',
+          'NOT CHECKED':'There was nothing to compare this photo’s clock with.'};
+        var lab=(t.clock_check||{}).label;
+        n.push(el('p','Clock check: '+(CLOCK[lab]||'not available')));
+        var o=t.outside_time||{};
+        if(o.status==='stamped')n.push(el('p','Outside time-stamp: an independent time-stamp authority ('+o.tsa+') signed that this photo’s record existed by '+o.gen_time+' (UTC). '+(o.chain_checked?'Its certificate chain was checked.':'Its certificate chain was not checked.')+' This is not the time the photo was taken.'));
+        else if(o.status==='waiting')n.push(el('p','Outside time-stamp: not yet. The daily outside time-stamp has not run since this photo was uploaded.'));
+      }
       if(d.hint)n.push(el('p',d.hint,'nomatch'));
       n.push(el('h3','What this does not show'));
       var lim=el('ul');(d.limitations||[]).forEach(function(t){lim.appendChild(el('li',t))});n.push(lim);

@@ -55,7 +55,7 @@ def test_the_original_file_matches_and_the_answer_carries_no_identity(env):
     body = r.json()
     assert body["match"] is True
     assert body["checks"] == {"supplied_equals_stored": True, "stored_original_intact": True, "record_signature_valid": True}
-    assert set(body) == {"match", "uploaded_at", "checks", "device_check", "uploader", "limitations"}
+    assert set(body) == {"match", "uploaded_at", "checks", "device_check", "uploader", "limitations", "timing"}  # "timing" is only on codes made after it existed (test_check_timing.py)
     text = r.text
     for secret in ("alice@example.com", "cp-1", "job-1", rh, env.phone.public_b64):
         assert secret not in text
