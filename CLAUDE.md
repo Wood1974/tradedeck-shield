@@ -40,7 +40,7 @@ Standing instructions from the owner. They apply to every session in this repo, 
 
 ## Running it
 
-- Tests: `cd server && python -m pytest` (install `requirements.txt` plus `pytest` and `httpx`). Run them before any push.
+- Tests: `cd server && python -m pytest` (install `requirements-dev.txt`; the production image installs only `requirements.txt`). Run them before any push.
 - Cloud sessions can't call the live server (the egress proxy refuses it). Check the live server through Render's logs and the dashboard, not `curl`.
 
 ## Facts that bite
