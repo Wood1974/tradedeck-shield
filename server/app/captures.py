@@ -183,8 +183,10 @@ def _view(row, ticket: dict | None = None, cover: dict | None = None) -> dict:
     }
 
 
-def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict) -> dict:
-    """Checks one upload and stores it. Raises Refused (nothing stored) when any check fails."""
+def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict, photo_bytes: bytes | None = None) -> dict:
+    """Checks one upload and stores it. Raises Refused (nothing stored) when any check fails.
+
+    The photo comes base64 in `upload["photo_b64"]`, or as raw bytes in `photo_bytes` (the multipart route). Every check after that is the same."""
     _init(local)
     record, prev_hash, rec_hash = upload.get("record"), None, None
     if not isinstance(record, dict):
@@ -194,10 +196,15 @@ def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict) -> dic
         raise Refused("record_invalid")
     if record_hash_of(record, prev_hash) != rec_hash:
         raise Refused("record_hash_mismatch")
-    raw_b64 = upload.get("photo_b64")
-    if isinstance(raw_b64, str) and len(raw_b64) > max_photo_bytes() * 4 // 3 + 8:
-        raise Refused("photo_too_large")
-    photo = strict_b64(raw_b64)
+    if photo_bytes is None:
+        raw_b64 = upload.get("photo_b64")
+        if isinstance(raw_b64, str) and len(raw_b64) > max_photo_bytes() * 4 // 3 + 8:
+            raise Refused("photo_too_large")
+        photo = strict_b64(raw_b64)
+    elif photo_bytes:
+        photo = photo_bytes
+    else:
+        raise Refused("photo_invalid")
     if len(photo) > max_photo_bytes():
         raise Refused("photo_too_large")
     if hashlib.sha256(photo).hexdigest() != record["photo_sha256"]:
