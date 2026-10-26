@@ -2,7 +2,7 @@
 
 Someone who needs a photo checked (an inspector, a lender) can compare it with the copy Shield stored, with no account, if the photographer gives them a **share code** and the **original file**.
 
-- The photographer makes a code for one uploaded photo: `POST /shield/captures/<record_hash>/share` (`{"days": 1-90}`, default 30). The code is 26 random characters, shown once, kept only as an HMAC, expires, and can be withdrawn with `DELETE /shield/shares/<id>`. `GET /shield/captures/<record_hash>/shares` lists the photographer's codes (never the codes themselves).
+- The photographer makes a code for one uploaded photo: `POST /shield/captures/<record_hash>/share` (`{"days": 1-90}`, default 30). The code is 26 random characters, shown once, kept only as an HMAC, expires, and can be withdrawn with `DELETE /shield/shares/<id>` (or `POST /shield/shares/<id>/revoke`, which the phone app can send; its web view is only allowed GET and POST across origins). `GET /shield/captures/<record_hash>/shares` lists the photographer's codes (never the codes themselves).
 - The checker opens `/check` (or posts to `POST /shield/v1/compare` with `code` and `photo`). The link may carry the code in its `#fragment`, which no server ever receives.
 - **Private to the photographer:** a wrong, expired or withdrawn code, and a file with no code, all answer the same `404 not_found`. Nothing is revealed without a code. The file is read in memory and dropped.
 - **The answer is facts only:** matched or not; the upload time on Shield's clock; whether the stored photo is unchanged and the record's device signature verifies; the Apple device-check result as stored; and, about the uploader, only whether the account passed the photo-ID and selfie check and on what day (`passed`, `test_mode` or `not_verified`). No name, account id, location, note or image.
@@ -11,3 +11,10 @@ Someone who needs a photo checked (an inspector, a lender) can compare it with t
 - Merkle proofs over uploaded records are planned as a second stage; they are not built.
 
 A stored photo can be checked by an outsider only with a share code the photographer made (private to the photographer). The checker learns only whether the uploader's account passed the ID check, never a name. Only uploaded photos can be compared, and only the original file matches.
+
+## What a code shows depends on when it was made (`capture_shares.scope`)
+- **Scope 1** (codes made before timing evidence existed, and any code in an older database): the match, the three checks, the upload time, the Apple device check, whether the uploader passed the ID check, and the limits. This is what the owner of those codes was told; they never show more.
+- **Scope 2** (every new code) adds `timing`, two facts and nothing else: `clock_check.label` (CONSISTENT, UNVERIFIED TIME, DEVICE CLOCK MISMATCH or NOT CHECKED, as worked out when the photo was uploaded) and `outside_time` (off, waiting, or stamped with the authority's time, address and whether its certificate chain was checked). The clock-check notes, the job-start ticket window and the ticket hash are never in the answer, and two more limits are added: the clock check is not a timestamp, and a stamp shows the record existed by that time, not when the photo was taken.
+- The scope is fixed when the code is made; nothing widens an existing code. `GET /shield/captures/<hash>/shares` says which codes carry timing (`timing: true`).
+- Efficient by design: the label is stored with the photo and the stamp is one indexed lookup (`outside_time.coverage_for`), so a public check does a bounded number of queries however big the account is (a test fails if that grows).
+- Chosen by the owner's test of faster, more efficient and more secure. Not included on purpose: the notes (they show restarts and clock drift in detail) and the job-start window (it shows when the work began).

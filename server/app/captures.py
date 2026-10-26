@@ -34,7 +34,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from . import outside_time
 from . import tickets, time_audit
-from .local_identity import LocalIdentity
+from .local_identity import LocalIdentity, init_once
 
 RECORD_VERSION = 1
 JS_SAFE_INT = 2 ** 53 - 1
@@ -141,6 +141,7 @@ def storage_root() -> Path:
     return Path(os.getenv("SHIELD_STORAGE_ROOT", "./storage")) / "captures"
 
 
+@init_once
 def _init(local: LocalIdentity) -> None:
     with local.db() as db:
         db.executescript("""
@@ -155,6 +156,7 @@ def _init(local: LocalIdentity) -> None:
             time_label TEXT, time_notes TEXT, ticket_hash TEXT,
             UNIQUE(account_id, record_hash)
           );
+          CREATE INDEX IF NOT EXISTS captures_account_received ON captures(account_id, received_at DESC);
         """)
         # A table made before the clock check existed has no such columns; its rows keep NULL, shown as NOT CHECKED.
         have = {row[1] for row in db.execute("PRAGMA table_info(captures)").fetchall()}
@@ -181,8 +183,10 @@ def _view(row, ticket: dict | None = None, cover: dict | None = None) -> dict:
     }
 
 
-def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict) -> dict:
-    """Checks one upload and stores it. Raises Refused (nothing stored) when any check fails."""
+def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict, photo_bytes: bytes | None = None) -> dict:
+    """Checks one upload and stores it. Raises Refused (nothing stored) when any check fails.
+
+    The photo comes base64 in `upload["photo_b64"]`, or as raw bytes in `photo_bytes` (the multipart route). Every check after that is the same."""
     _init(local)
     record, prev_hash, rec_hash = upload.get("record"), None, None
     if not isinstance(record, dict):
@@ -192,10 +196,15 @@ def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict) -> dic
         raise Refused("record_invalid")
     if record_hash_of(record, prev_hash) != rec_hash:
         raise Refused("record_hash_mismatch")
-    raw_b64 = upload.get("photo_b64")
-    if isinstance(raw_b64, str) and len(raw_b64) > max_photo_bytes() * 4 // 3 + 8:
-        raise Refused("photo_too_large")
-    photo = strict_b64(raw_b64)
+    if photo_bytes is None:
+        raw_b64 = upload.get("photo_b64")
+        if isinstance(raw_b64, str) and len(raw_b64) > max_photo_bytes() * 4 // 3 + 8:
+            raise Refused("photo_too_large")
+        photo = strict_b64(raw_b64)
+    elif photo_bytes:
+        photo = photo_bytes
+    else:
+        raise Refused("photo_invalid")
     if len(photo) > max_photo_bytes():
         raise Refused("photo_too_large")
     if hashlib.sha256(photo).hexdigest() != record["photo_sha256"]:
@@ -253,9 +262,11 @@ def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict) -> dic
     return {**_view(row, ticket_view(local, account_id, anchor)), "already": False}
 
 
-def ticket_view(local: LocalIdentity, account_id: str, ticket_hash: str | None) -> dict:
-    """Whether a server-signed ticket anchors this record's chain, and the window it started in."""
-    started = tickets.by_hash(local, account_id, ticket_hash) if ticket_hash else None
+def ticket_view(local: LocalIdentity, account_id: str, ticket_hash: str | None, started: dict | None = None) -> dict:
+    """Whether a server-signed ticket anchors this record's chain, and the window it started in.
+    `started` is the already looked-up start (list_for finds them all in one query); without it this looks it up."""
+    if started is None and ticket_hash:
+        started = tickets.by_hash(local, account_id, ticket_hash)
     if not started:
         return {"origin": "local"}
     iso = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).isoformat()
@@ -266,8 +277,17 @@ def list_for(local: LocalIdentity, account_id: str, limit: int = 200) -> list[di
     _init(local)
     with local.db() as db:
         rows = db.execute("SELECT * FROM captures WHERE account_id=? ORDER BY received_at DESC LIMIT ?", (account_id, limit)).fetchall()
-    cover = outside_time.coverage(local, account_id)
-    return [_view(r, ticket_view(local, account_id, r["ticket_hash"]), cover.get(r["record_hash"])) for r in rows]
+    cover = outside_time.coverage_for(local, account_id, [r["record_hash"] for r in rows])
+    starts = tickets.by_hashes(local, account_id, [r["ticket_hash"] for r in rows])
+    return [_view(r, ticket_view(local, account_id, r["ticket_hash"], starts.get(r["ticket_hash"])), cover.get(r["record_hash"])) for r in rows]
+
+
+def photos_per_phone_key(local: LocalIdentity, account_id: str) -> dict[str, int]:
+    """How many of this account's stored photos each App Attest key signed for (the key id the phone sent with the upload)."""
+    _init(local)
+    with local.db() as db:
+        rows = db.execute("SELECT attest_key_id, COUNT(*) AS n FROM captures WHERE account_id=? AND attest_key_id IS NOT NULL GROUP BY attest_key_id", (account_id,)).fetchall()
+    return {r["attest_key_id"]: r["n"] for r in rows}
 
 
 def read_photo(local: LocalIdentity, account_id: str, record_hash: str) -> bytes | None:

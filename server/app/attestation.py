@@ -227,6 +227,8 @@ class AttestationVerifier:
                 raise ValueError("unregistered_attestation_key")
             if account_id is not None and key["account_id"] != account_id:
                 raise ValueError("attestation_key_account_mismatch")
+            if key["revoked_at"] is not None:
+                raise ValueError("attestation_key_revoked")
             public_key = serialization.load_der_public_key(base64.b64decode(key["public_key_der_b64"]))
             if not isinstance(public_key, ec.EllipticCurvePublicKey):
                 raise ValueError("stored_key_not_ec")

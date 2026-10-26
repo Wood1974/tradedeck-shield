@@ -43,6 +43,8 @@ def list_shares(request:Request,record_hash:str):
     if found is None: raise HTTPException(404,"not_found")
     return {"shares":found}
 
+# POST as well as DELETE: the phone app's web view is only allowed to send GET and POST across origins (CORS in main.py).
+@router.post("/shield/shares/{share_id}/revoke")
 @router.delete("/shield/shares/{share_id}")
 def revoke_share(request:Request,share_id:str):
     account_id=local_account_id(request)

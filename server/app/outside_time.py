@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 import httpx
 
 from . import rfc3161
-from .local_identity import LocalIdentity
+from .local_identity import LocalIdentity, init_once
 
 log = logging.getLogger(__name__)
 DAY_S = 86_400
@@ -46,6 +46,7 @@ def _roots():
         return rfc3161.load_roots(f.read())
 
 
+@init_once
 def _init(local: LocalIdentity) -> None:
     with local.db() as db:
         db.executescript("""
@@ -56,7 +57,40 @@ def _init(local: LocalIdentity) -> None:
             UNIQUE(account_id, head_record_hash)
           );
           CREATE TABLE IF NOT EXISTS outside_timestamp_runs (id INTEGER PRIMARY KEY CHECK (id = 1), last_run REAL NOT NULL);
+          -- Which stamp first covers each record, written when the stamp is taken, so no reader has to walk a chain.
+          CREATE TABLE IF NOT EXISTS outside_timestamp_cover (
+            account_id TEXT NOT NULL, record_hash TEXT NOT NULL, stamp_id TEXT NOT NULL REFERENCES outside_timestamps(id),
+            PRIMARY KEY(account_id, record_hash)
+          );
         """)
+        # Stamps taken before this table existed own no rows in it: cover them now, oldest first. A stamp always owns at
+        # least the record it was taken on, so a stamp with no rows is exactly one that has not been covered yet.
+        for stamp in db.execute("SELECT t.id, t.account_id, t.head_record_hash FROM outside_timestamps t WHERE NOT EXISTS "
+                                "(SELECT 1 FROM outside_timestamp_cover c WHERE c.stamp_id = t.id) ORDER BY t.gen_time").fetchall():
+            _cover_from(db, stamp["account_id"], stamp["id"], stamp["head_record_hash"])
+
+
+def _cover_from(db, account_id: str, stamp_id: str, head: str) -> None:
+    """Marks the head and every record before it that no earlier stamp already covers. Stops at the first one that is
+    covered, since an earlier stamp has already covered it and everything before it."""
+    h, hops = head, 0
+    while hops < 100_000:
+        row = db.execute("SELECT prev_hash FROM captures WHERE account_id=? AND record_hash=?", (account_id, h)).fetchone()
+        if row is None:
+            break
+        if db.execute("INSERT OR IGNORE INTO outside_timestamp_cover(account_id,record_hash,stamp_id) VALUES(?,?,?)", (account_id, h, stamp_id)).rowcount == 0:
+            break
+        h, hops = row["prev_hash"], hops + 1
+
+
+def store_stamp(db, account_id: str, head: str, imprint_hex: str, reply_b64: str, gen_time: float, tsa_url: str, chain_checked: bool, created_at: float) -> bool:
+    """Keeps a stamp and records, in the same transaction, which records it covers. False if this head already has one."""
+    stamp_id = str(uuid.uuid4())
+    if db.execute("INSERT OR IGNORE INTO outside_timestamps(id,account_id,head_record_hash,imprint_hex,reply_b64,gen_time,tsa_url,chain_checked,created_at)"
+                  " VALUES(?,?,?,?,?,?,?,?,?)", (stamp_id, account_id, head, imprint_hex, reply_b64, gen_time, tsa_url, int(chain_checked), created_at)).rowcount == 0:
+        return False
+    _cover_from(db, account_id, stamp_id, head)
+    return True
 
 
 def _post(url: str, request: bytes) -> bytes:
@@ -88,10 +122,8 @@ def stamp_pending(local: LocalIdentity, post=_post, roots=None, url: str | None 
             reply = post(url, rfc3161.build_request(imprint, nonce))
             checked = rfc3161.check_reply(reply, imprint, nonce, roots)
             with local.db() as db:
-                db.execute("INSERT OR IGNORE INTO outside_timestamps(id,account_id,head_record_hash,imprint_hex,reply_b64,gen_time,tsa_url,chain_checked,created_at)"
-                           " VALUES(?,?,?,?,?,?,?,?,?)",
-                           (str(uuid.uuid4()), account_id, head, imprint.hex(), base64.b64encode(reply).decode("ascii"),
-                            checked["gen_time"].timestamp(), url, int(checked["chain_checked"]), now()))
+                store_stamp(db, account_id, head, imprint.hex(), base64.b64encode(reply).decode("ascii"),
+                            checked["gen_time"].timestamp(), url, checked["chain_checked"], now())
             done += 1
         except Exception as exc:  # network, a refusal, or a reply that failed its checks: nothing is kept
             failed += 1
@@ -125,21 +157,34 @@ def start_daily(local: LocalIdentity) -> threading.Thread:
     return thread
 
 
+_COVER_SELECT = ("SELECT c.record_hash, t.gen_time, t.tsa_url, t.chain_checked, t.head_record_hash FROM outside_timestamp_cover c "
+                 "JOIN outside_timestamps t ON t.id = c.stamp_id WHERE c.account_id=?")
+
+
+def _cover_view(r) -> dict:
+    return {"gen_time": r["gen_time"], "tsa_url": r["tsa_url"], "chain_checked": bool(r["chain_checked"]), "head_record_hash": r["head_record_hash"]}
+
+
+def coverage_for(local: LocalIdentity, account_id: str, hashes) -> dict[str, dict]:
+    """record_hash -> the earliest stamp that covers it, for just these records: one indexed query however big the account is."""
+    wanted = sorted({h for h in hashes if h})
+    if not wanted:
+        return {}
+    _init(local)
+    out: dict[str, dict] = {}
+    with local.db() as db:
+        for i in range(0, len(wanted), 500):  # stays under SQLite's limit on query parameters
+            chunk = wanted[i:i + 500]
+            for r in db.execute(f"{_COVER_SELECT} AND c.record_hash IN ({','.join('?' * len(chunk))})", (account_id, *chunk)).fetchall():
+                out[r["record_hash"]] = _cover_view(r)
+    return out
+
+
 def coverage(local: LocalIdentity, account_id: str) -> dict[str, dict]:
-    """record_hash -> the earliest stamp that covers it (the stamped head, or any later record in its chain's past)."""
+    """The same for every record the account has covered. Meant for checks and tools; the request paths use coverage_for."""
     _init(local)
     with local.db() as db:
-        stamps = db.execute("SELECT head_record_hash, gen_time, tsa_url, chain_checked FROM outside_timestamps WHERE account_id=? ORDER BY gen_time", (account_id,)).fetchall()
-        if not stamps:
-            return {}
-        prev = {r["record_hash"]: r["prev_hash"] for r in db.execute("SELECT record_hash, prev_hash FROM captures WHERE account_id=?", (account_id,)).fetchall()}
-    out: dict[str, dict] = {}
-    for s in stamps:  # oldest stamp first, so a record keeps the earliest time that covers it
-        h, hops = s["head_record_hash"], 0
-        while h in prev and hops < 100_000:
-            out.setdefault(h, {"gen_time": s["gen_time"], "tsa_url": s["tsa_url"], "chain_checked": bool(s["chain_checked"]), "head_record_hash": s["head_record_hash"]})
-            h, hops = prev[h], hops + 1
-    return out
+        return {r["record_hash"]: _cover_view(r) for r in db.execute(_COVER_SELECT, (account_id,)).fetchall()}
 
 
 def view(cover: dict | None) -> dict:
@@ -150,7 +195,7 @@ def view(cover: dict | None) -> dict:
 
 def token_for(local: LocalIdentity, account_id: str, record_hash: str) -> dict | None:
     """The stored reply that covers this record, for the account that owns it. None when there is none."""
-    cover = coverage(local, account_id).get(record_hash)
+    cover = coverage_for(local, account_id, [record_hash]).get(record_hash)
     if not cover:
         return None
     with local.db() as db:

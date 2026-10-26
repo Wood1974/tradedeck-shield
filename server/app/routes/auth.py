@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..auth import actor_for
+from ..security import login_failed, login_succeeded, login_throttle_check
 
 router = APIRouter()
 
@@ -25,13 +26,17 @@ def local_login(body:LocalLogin):
     if os.getenv("SHIELD_API_AUTH_MODE", "development") != "local":
         raise HTTPException(404,"local_identity_disabled")
     from ..local_identity import identity, TOKEN_TTL_SECONDS
+    login_throttle_check(body.email)
     try:
         local=identity()
         account=local.authenticate(body.email,body.password)
-        if not account: raise HTTPException(401,"invalid_credentials")
+        if not account:
+            login_failed(body.email)
+            raise HTTPException(401,"invalid_credentials")
         token=local.token(account)
     except RuntimeError as exc:
         raise HTTPException(503,str(exc)) from exc
+    login_succeeded(body.email)
     return {"access_token":token,"token_type":"bearer","expires_in":TOKEN_TTL_SECONDS,
             "account_id":account.id,"role":account.role}
 

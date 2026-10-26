@@ -9,6 +9,9 @@ Privacy, by design
   answer the same `not_found`. A file alone never tells anyone whether Shield holds it.
 - The answer is facts only. It never carries a name, an account id, the location, the note or the image itself. About
   the uploader it says one thing: whether the account passed the photo-ID and selfie check, and on what day.
+- What a code shows is fixed when the code is made (`scope`). Codes made before timing evidence existed (scope 1) never
+  show it; codes made after (scope 2) add two timing facts and nothing else: the clock-check label, and whether an outside
+  time-stamp covers the photo. The clock-check notes and the job-start window are never in the answer.
 - A code is 26 random characters (about 128 bits), shown once and kept only as an HMAC. It can be revoked and expires.
 - The submitted file is read in memory, compared and dropped. Nothing from the person checking is kept; the log
   records only that a check happened and whether it matched.
@@ -30,9 +33,9 @@ import uuid
 from collections import deque
 from datetime import datetime, timezone
 
-from . import captures
+from . import captures, outside_time
 from .custody_chain import event_hash
-from .local_identity import LocalIdentity
+from .local_identity import LocalIdentity, init_once
 
 DEFAULT_DAYS = 30
 MAX_DAYS = 90
@@ -49,19 +52,29 @@ LIMITATIONS = [
     "The capture time is the phone's clock. The upload time is Shield's clock.",
     "A copy sent by email or a messaging app is usually recompressed and will not match. Use the original file.",
 ]
+# What a code made at each scope may show. A code never gains scope after it is made.
+SCOPE_BASIC = 1
+SCOPE_TIMING = 2
+TIMING_LIMITATIONS = [
+    "The clock check compares the phone's own clocks with each other. It is not a timestamp, and 'consistent' does not show when the photo was taken.",
+    "An outside time-stamp shows that the photo's record existed by that time. It does not show when the photo was taken.",
+]
 MISMATCH_HINT = (
     "This file is not the one Shield stored. A photo sent by email or a messaging app is usually recompressed, which "
     "changes it. Ask for the original file, sent as a file or attachment, not as a picture in a message."
 )
 
 
+@init_once
 def _init(local: LocalIdentity) -> None:
     captures._init(local)
+    outside_time._init(local)
     with local.db() as db:
         db.executescript("""
           CREATE TABLE IF NOT EXISTS capture_shares (
             id TEXT PRIMARY KEY, capture_id TEXT NOT NULL REFERENCES captures(id), account_id TEXT NOT NULL,
-            code_hmac TEXT NOT NULL UNIQUE, created_at REAL NOT NULL, expires_at REAL NOT NULL, revoked_at REAL
+            code_hmac TEXT NOT NULL UNIQUE, created_at REAL NOT NULL, expires_at REAL NOT NULL, revoked_at REAL,
+            scope INTEGER NOT NULL DEFAULT 1
           );
           CREATE INDEX IF NOT EXISTS capture_shares_capture ON capture_shares(capture_id);
           CREATE TABLE IF NOT EXISTS compare_log (
@@ -69,6 +82,9 @@ def _init(local: LocalIdentity) -> None:
             previous_hash TEXT, event_hash TEXT NOT NULL
           );
         """)
+        # A table made before timing evidence existed has no scope column; its codes read as scope 1 (the original promise).
+        if "scope" not in {row[1] for row in db.execute("PRAGMA table_info(capture_shares)").fetchall()}:
+            db.execute("ALTER TABLE capture_shares ADD COLUMN scope INTEGER NOT NULL DEFAULT 1")
 
 
 def normalize(code: str) -> str:
@@ -112,8 +128,8 @@ def create(local: LocalIdentity, account_id: str, record_hash: str, days: int = 
             return None
         code = "".join(secrets.choice(ALPHABET) for _ in range(CODE_LENGTH))
         now, share_id = time.time(), str(uuid.uuid4())
-        db.execute("INSERT INTO capture_shares(id,capture_id,account_id,code_hmac,created_at,expires_at) VALUES(?,?,?,?,?,?)",
-                   (share_id, capture["id"], account_id, _hmac(code), now, now + days * 86400))
+        db.execute("INSERT INTO capture_shares(id,capture_id,account_id,code_hmac,created_at,expires_at,scope) VALUES(?,?,?,?,?,?,?)",
+                   (share_id, capture["id"], account_id, _hmac(code), now, now + days * 86400, SCOPE_TIMING))
     return {"id": share_id, "code": display(code), "expires_at": _iso(now + days * 86400)}
 
 
@@ -128,7 +144,8 @@ def list_for(local: LocalIdentity, account_id: str, record_hash: str) -> list[di
             return None
         rows = db.execute("SELECT * FROM capture_shares WHERE capture_id=? AND account_id=? ORDER BY created_at DESC", (capture["id"], account_id)).fetchall()
     return [{"id": r["id"], "created_at": _iso(r["created_at"]), "expires_at": _iso(r["expires_at"]),
-             "revoked": r["revoked_at"] is not None, "active": r["revoked_at"] is None and r["expires_at"] > now} for r in rows]
+             "revoked": r["revoked_at"] is not None, "active": r["revoked_at"] is None and r["expires_at"] > now,
+             "timing": r["scope"] >= SCOPE_TIMING} for r in rows]
 
 
 def revoke(local: LocalIdentity, account_id: str, share_id: str) -> bool:
@@ -168,7 +185,7 @@ def compare(local: LocalIdentity, code: str, supplied: bytes) -> dict | None:
     now = time.time()
     with local.db() as db:
         row = db.execute(
-            "SELECT s.id AS share_id, s.expires_at, s.revoked_at, c.* FROM capture_shares s JOIN captures c ON c.id = s.capture_id "
+            "SELECT s.id AS share_id, s.expires_at, s.revoked_at, s.scope, c.* FROM capture_shares s JOIN captures c ON c.id = s.capture_id "
             "WHERE s.code_hmac=?", (_hmac(normalized),)).fetchone()
     if not row or row["revoked_at"] is not None or row["expires_at"] <= now:
         return None
@@ -195,6 +212,12 @@ def compare(local: LocalIdentity, code: str, supplied: bytes) -> dict | None:
         "uploader": _uploader_status(row["account_id"], row["received_at"]),
         "limitations": LIMITATIONS,
     }
+    if row["scope"] >= SCOPE_TIMING:
+        # Two facts, both worked out before this request (the label when the photo was uploaded, the stamp when it was taken):
+        # no notes, no job-start window, nothing that needs account-sized work on this public route.
+        cover = outside_time.coverage_for(local, row["account_id"], [row["record_hash"]]).get(row["record_hash"])
+        result["timing"] = {"clock_check": {"label": row["time_label"] or "NOT CHECKED"}, "outside_time": outside_time.view(cover)}
+        result["limitations"] = LIMITATIONS + TIMING_LIMITATIONS
     if not supplied_ok:
         result["hint"] = MISMATCH_HINT
     _log(local, row["share_id"], "match" if matched else "no_match")
