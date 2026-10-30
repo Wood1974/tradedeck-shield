@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
+from .. import attestation_evidence
 from ..attestation_sheet import AttestationSheet
 from ..auth import actor_for
 from ..capture_packs import PACKS
@@ -63,6 +64,8 @@ def register_attestation(request:Request, account_id:str|None=Form(None), key_id
         raise HTTPException(422, result.get("status", "attestation_rejected"))
     try:
             _m().store.save_attestation_key(key_id, account_id, result["public_key_der_b64"], result["environment"], result.get("receipt_b64", ""))
+            # Keep what Apple signed, not only the verdict, so it can be checked without this server (attestation_evidence.py).
+            attestation_evidence.save(_m().store, key_id, account_id, attestation, nonce, _m().att.app_id, result["environment"])
     except ValueError as e:
         raise HTTPException(409, str(e))
     return {"trusted": True, "status": "attested", "key_id": key_id, "environment": result["environment"]}

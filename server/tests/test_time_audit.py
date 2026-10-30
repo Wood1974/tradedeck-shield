@@ -165,3 +165,34 @@ def test_a_table_made_before_the_clock_check_is_upgraded_and_old_rows_say_so(env
     assert listed[0]["time"] == {"label": time_audit.NOT_CHECKED, "notes": ["stored before the clock check existed"]}
     item = Phone().seal(photo(9))
     assert env.client.post("/shield/captures", json=item, headers=env.alice).status_code == 200
+
+
+# --- a clock set back before the chain began (found by running the checker, not by reading it) ---
+DAY = 86_400_000
+
+
+def _rec(wall, mono, **extra):
+    return {"wall_time_ms": wall, "monotonic_ms": mono, "boot_id": "b1", "boot_count": 7, **extra}
+
+
+def test_a_clock_set_back_before_the_chain_still_reads_consistent_but_never_claims_the_date():
+    now = 1_790_000_000_000
+    first, second = _rec(now - 2 * DAY, 1_000_000), _rec(now - 2 * DAY + 60_000, 1_060_000)
+    got = time_audit.assess(second, first, now)
+    assert got["label"] == time_audit.CONSISTENT  # honest: the phone's own clocks do agree
+    text = " ".join(got["notes"])
+    assert "the phone's word" in text and "no server ticket" in text
+    assert "2 days before it uploaded" in text
+
+
+def test_a_server_ticket_at_the_start_removes_the_phones_word_notes():
+    now = 1_790_000_000_000
+    first, second = _rec(now - 60_000, 1_000_000), _rec(now - 1_000, 1_059_000)
+    assert time_audit.assess(second, first, now, anchored=True) == {"label": time_audit.CONSISTENT, "notes": []}
+    assert "phone's word" in " ".join(time_audit.assess(second, first, now)["notes"])
+
+
+def test_old_photos_are_not_flagged_as_a_mismatch_just_for_waiting_for_signal():
+    now = 1_790_000_000_000
+    got = time_audit.assess(_rec(now - 3 * DAY, 5), None, now)
+    assert got["label"] == time_audit.NOT_CHECKED and "3 days before" in " ".join(got["notes"])

@@ -14,8 +14,8 @@ A plain statement of what a Shield photo, a share-code check and an exported fil
 
 | Check | What it shows | What it does not |
 |---|---|---|
-| Apple device check (App Attest) | Apple vouched for a key on a genuine device running this app, and that key signed this record's hash. Shown only when the server verified Apple's assertion. | Not that the scene is true. Not who holds the phone. A phone that was never enrolled shows "none". A withdrawn phone key reports `attestation_key_revoked`. |
-| Clock check | The phone's own clocks (wall clock, monotonic clock, GPS time, boot count) agree with each other and with the ticket. | Not a timestamp. "Consistent" does not show when the photo was taken. |
+| Apple device check (App Attest) | Apple vouched for a key on a genuine device running this app, and that key signed this record's hash. Shown only when the server verified Apple's assertion. | Not that the scene is true. Not who holds the phone. A phone that was never enrolled shows "none". A withdrawn phone key reports `attestation_key_revoked`. The server's verdict is its own word; for photos uploaded after Apple's evidence was kept, an account can fetch the evidence and re-check it offline ([apple-evidence](apple-evidence.md)). Older photos cannot be re-checked. |
+| Clock check | The phone's own clocks (wall clock, monotonic clock, GPS time, boot count) agree with each other and with the ticket. | Not a timestamp. "Consistent" does not show when the photo was taken: a clock set back before the chain began still reads consistent. Without a server ticket at the start, the notes say the date is the phone's word. |
 | Server ticket | A chain began after the server signed a start-of-job ticket, so the chain is anchored no earlier than the ticket. | Not when each photo was taken. Only on photos that started from a ticket. |
 | Outside time-stamp (RFC 3161) | The photo's record existed by the time-stamp authority's time. | Not when it was taken. Off on the live server until its time-stamp service is switched on. |
 | ID check (Stripe Identity) | The photographer passed a photo-ID and live-selfie check at sign-on, and signed a note with their device key. | Not that the person in the field is the one who passed. A test-mode check is labelled as such and never counted as confirmed. |
@@ -26,7 +26,7 @@ Only a person holding the code and the original file. They learn whether the fil
 
 ## What the offline checkers show
 
-`verifier/shield_verify.py` checks uploaded records and `verifier/shield_vault_verify.py` checks the app's exports, with no network and no Shield code. Passing means nothing signed changed, the photo is the signed one, the records link and (for a close-out packet) the counts and times are consistent. They say `NOT CHECKED` for what they cannot check (the photographer's note and ID receipt, the Apple token) and never report a pass for it.
+`verifier/shield_verify.py` checks uploaded records and `verifier/shield_vault_verify.py` checks the app's exports, with no network and no Shield code. Passing means nothing signed changed, the photo is the signed one, the records link and (for a close-out packet) the counts and times are consistent. They say `NOT CHECKED` for what they cannot check (the photographer's note and ID receipt; Apple's evidence is checked by `verifier/shield_apple_verify.py`, a separate file) and never report a pass for it.
 
 ## What Shield does not show, in any case
 
