@@ -160,7 +160,7 @@ def _init(local: LocalIdentity) -> None:
         """)
         # A table made before the clock check existed has no such columns; its rows keep NULL, shown as NOT CHECKED.
         have = {row[1] for row in db.execute("PRAGMA table_info(captures)").fetchall()}
-        for column in ("time_label", "time_notes", "ticket_hash"):
+        for column in ("time_label", "time_notes", "ticket_hash", "attest_assertion_b64"):
             if column not in have:
                 db.execute(f"ALTER TABLE captures ADD COLUMN {column} TEXT")
 
@@ -240,7 +240,7 @@ def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict, photo_
     anchor = started["ticket_hash"] if started else (before["ticket_hash"] if before else None)
     baseline = started["clock"] if started else (json.loads(before["record_json"]) if before else None)
     # Never blocks a photo: the result is stored beside it, like the Apple check.
-    clock = time_audit.assess(record, baseline, int(now * 1000))
+    clock = time_audit.assess(record, baseline, int(now * 1000), anchored=anchor is not None)
 
     path = _photo_path(account_id, rec_hash)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -252,9 +252,9 @@ def ingest(local: LocalIdentity, verifier, account_id: str, upload: dict, photo_
         with local.db() as db:
             db.execute(
                 "INSERT INTO captures(id,account_id,record_hash,prev_hash,ticket_id,checkpoint_id,photo_sha256,photo_bytes,record_json,"
-                "signature_der_b64,public_key_b64,attest_key_id,attest_status,attest_trusted,received_at,time_label,time_notes,ticket_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "signature_der_b64,public_key_b64,attest_key_id,attest_status,attest_trusted,received_at,time_label,time_notes,ticket_hash,attest_assertion_b64) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (row_id, account_id, rec_hash, prev_hash, record["ticket_id"], record["checkpoint_id"], record["photo_sha256"], len(photo),
-                 json.dumps(record, sort_keys=True), signature, public_key, key_id, attest_status, int(trusted), now, clock["label"], json.dumps(clock["notes"]), anchor))
+                 json.dumps(record, sort_keys=True), signature, public_key, key_id, attest_status, int(trusted), now, clock["label"], json.dumps(clock["notes"]), anchor, assertion if (key_id and assertion) else None))
             row = db.execute("SELECT * FROM captures WHERE id=?", (row_id,)).fetchone()
     except Exception:
         path.unlink(missing_ok=True)
@@ -280,6 +280,13 @@ def list_for(local: LocalIdentity, account_id: str, limit: int = 200) -> list[di
     cover = outside_time.coverage_for(local, account_id, [r["record_hash"] for r in rows])
     starts = tickets.by_hashes(local, account_id, [r["ticket_hash"] for r in rows])
     return [_view(r, ticket_view(local, account_id, r["ticket_hash"], starts.get(r["ticket_hash"])), cover.get(r["record_hash"])) for r in rows]
+
+
+def row_for(local: LocalIdentity, account_id: str, record_hash: str):
+    """This account's stored capture row for a record hash, or None."""
+    _init(local)
+    with local.db() as db:
+        return db.execute("SELECT * FROM captures WHERE account_id=? AND record_hash=?", (account_id, record_hash)).fetchone()
 
 
 def photos_per_phone_key(local: LocalIdentity, account_id: str) -> dict[str, int]:
