@@ -14,6 +14,11 @@ Checks (limit 120000 ms, the same as the phone's own time labels in the app):
 - The wall clock against the server's: a photo cannot have been taken after the server received it. Taken long before is normal
   (photos wait for signal), so that side is never flagged.
 
+Checked by running it: a phone whose clock was set back days BEFORE a chain began, then took two photos in one boot, earns CONSISTENT,
+because every comparison above is between the phone's own clocks and the server only flags a phone that is ahead of it. So CONSISTENT
+never says the date is right. Only a server ticket at the start of the chain (a time the server signed, before the first photo) puts a
+floor under the date; `anchored` says whether one did, and without it the notes say the date is the phone's word.
+
 Labels, strongest first: DEVICE CLOCK MISMATCH, UNVERIFIED TIME, CONSISTENT, NOT CHECKED.
 CONSISTENT needs a real comparison to have passed (the chain interval or GPS time) and nothing unverifiable. The server-clock check
 alone never earns it. Any one disagreement is a MISMATCH even when other checks agreed.
@@ -21,6 +26,7 @@ alone never earns it. Any one disagreement is a MISMATCH even when other checks 
 from __future__ import annotations
 
 LIMIT_MS = 120_000
+STALE_MS = 24 * 60 * 60 * 1000  # older than this at upload, with no anchor, is said out loud (never a mismatch: photos wait for signal)
 
 CONSISTENT = "CONSISTENT"
 UNVERIFIED = "UNVERIFIED TIME"
@@ -36,7 +42,7 @@ def _same_boot(a: dict, b: dict) -> bool | None:
     return None
 
 
-def assess(record: dict, previous: dict | None, received_at_ms: int) -> dict:
+def assess(record: dict, previous: dict | None, received_at_ms: int, anchored: bool = False) -> dict:
     notes: list[str] = []
     mismatch = False
     passed = False
@@ -83,4 +89,10 @@ def assess(record: dict, previous: dict | None, received_at_ms: int) -> dict:
     else:
         label = NOT_CHECKED
         notes.append("nothing to compare it with: no job ticket or earlier record from this chain on the server and no GPS time")
+    if not anchored:
+        if label == CONSISTENT:
+            notes.append("the phone's clocks agree with each other; the date itself is the phone's word, because no server ticket started this chain")
+        age = received_at_ms - record["wall_time_ms"]
+        if label != MISMATCH and age > STALE_MS:
+            notes.append(f"the photo says it was taken {age / 86_400_000:.0f} days before it uploaded; with no server ticket that date is the phone's word")
     return {"label": label, "notes": notes}
