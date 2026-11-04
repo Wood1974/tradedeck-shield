@@ -5,6 +5,8 @@
 
 Writes `eval_set.json` (an `inspection_eval_set.v1`) and `eval_set.json.files.json` (which case id is which photo file, so a wrong or
 missed case in a run can be found again). The photo's SHA-256 is computed from the ORIGINAL file; nothing is uploaded.
+Only JPEG files up to 15 MB are accepted, because that is all the Shield server stores: labelling other kinds of file would measure
+photos Shield never receives.
 
 The sheet: one row per photo. `photo_file` is the file name inside --photos. `checkpoint` (optional) is where in the job it was
 taken, for example `pre-pour`; it is kept as a condition tag `checkpoint-pre-pour`. `conditions` (optional) are tags separated by
@@ -32,6 +34,8 @@ from app import inspection_eval as ev  # noqa: E402  (the harness's own checks d
 FIXED = ("photo_file", "checkpoint", "conditions")
 SLUG = re.compile(r"[^a-z0-9._-]+")
 FEW = 10  # warn when a label has fewer present photos than this
+JPEG_MAGIC = b"\xff\xd8\xff"
+MAX_PHOTO_BYTES = 15 * 1024 * 1024  # the Shield server's default limit (SHIELD_MAX_PHOTO_BYTES); it accepts JPEG only
 
 
 class SheetError(ValueError):
@@ -80,7 +84,13 @@ def build(csv_text: str, photos: Path) -> tuple[dict, dict, list[str]]:
         path = photos / name
         if not path.is_file():
             raise SheetError(f"row {line_no}: {name} is not in {photos}")
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        data = path.read_bytes()
+        if not data.startswith(JPEG_MAGIC):
+            raise SheetError(f"row {line_no}: {name} is not a JPEG. Shield stores JPEG only and its camera makes JPEG; a HEIC or PNG photo may "
+                             "behave differently, so it would not tell you how Shield's photos do")
+        if len(data) > MAX_PHOTO_BYTES:
+            raise SheetError(f"row {line_no}: {name} is {len(data) // (1024 * 1024)} MB; the Shield server's limit is 15 MB")
+        digest = hashlib.sha256(data).hexdigest()
         if digest in hashes:
             raise SheetError(f"row {line_no}: {name} is the same file as {hashes[digest]} (one photo cannot count twice)")
         hashes[digest] = name

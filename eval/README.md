@@ -8,7 +8,7 @@ Open `eval/labels_template.csv` in Excel, Numbers or Google Sheets. Row 1 is the
 
 | Column | What to put |
 |---|---|
-| `photo_file` | The file name of the **original** photo, exactly as it is in your photo folder (for example `IMG_4021.jpg`). Not a screenshot or a copy sent by text message: the converter fingerprints the file, and a re-saved copy is a different file. |
+| `photo_file` | The file name of the **original JPEG** photo, exactly as it is in your photo folder (for example `IMG_4021.jpg`). Not a screenshot or a copy sent by text message: the converter fingerprints the file, and a re-saved copy is a different file. |
 | `checkpoint` | Where in the job it was taken, for example `pre-pour`. Optional, but fill it in for any photo where a step could be missing. |
 | `conditions` | Anything that could change how hard the photo is, separated by semicolons: `concrete;daylight`, `framing;low-light`. Optional. Results are reported per condition, so be consistent. |
 | `material:...`, `missing-step:...`, `defect:...` | Put `x` if it is **truly present** in the photo. Leave blank if not. Nothing else: `y`, `yes` and `1` are refused so a typo is not silently counted as "no". |
@@ -22,11 +22,15 @@ How to decide what is present:
 
 The columns that ship are **placeholders**. They are your trades, not mine: add, rename or delete label columns to match your work. A label column is `category:label`, lowercase, no spaces (`material:pvc-pipe`). The three categories must each keep at least one column.
 
-## 2. Keep these photos separate
+## 2. Take the photos the way Shield does
+
+The Shield server stores JPEG only (up to 15 MB), so the converter **refuses anything that is not a JPEG** (HEIC from the stock Camera app, PNG, screenshots), even if the file name says `.jpg`. Photos taken another way can look different to an AI, and a score on them would not tell you how Shield's photos do. The closest match is photos that came from the Shield camera. Getting a plain JPEG out of the Shield app is not built (its export file holds the photo inside a signed package), so for now this is a limit: if you label JPEGs from another camera, say so when you report results.
+
+## 3. Keep these photos separate
 
 Put the photos you label in their own folder, apart from real job records. Do not label photos with people's faces or licence plates in them if you can avoid it.
 
-## 3. Convert
+## 4. Convert
 
 Save the sheet as CSV, then from the repo root:
 
@@ -36,10 +40,10 @@ python eval/csv_to_set.py labels.csv --photos /path/to/photo/folder --out eval_s
 
 It writes `eval_set.json` (what the scorer reads) and `eval_set.json.files.json` (which case is which photo, so a wrong answer in a run can be traced to a file). It refuses, and names the row for: a typo in an `x` cell, a missing file, the same file twice (even under two names), an unknown column. It warns, without stopping, about labels with few examples.
 
-## 4. How many photos
+## 5. How many photos
 
 This is arithmetic, not a promise. A rate measured on few examples has a wide margin: a perfect 40 out of 40 still only supports "at least about 91%". Each label needs its own examples, and the label's *present* photos are what count for recall. So **more photos showing each thing you care about** helps more than more labels. About 100 photos, spread across many labels, will give wide intervals on most of them; the scorer prints those intervals rather than hiding them, and calls a category "not validated" unless the margin clears the pass bar you set.
 
-## 5. Score a model (later)
+## 6. Score a model (later)
 
 `python -m app.inspection_eval eval_set.json submission.json` (from `server/`) scores a model's answers. There is no live model call yet; see `docs/features/inspection-eval.md`.

@@ -13,6 +13,7 @@ spec = importlib.util.spec_from_file_location("csv_to_set", ROOT / "eval" / "csv
 cs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cs)
 
+JPEG = b"\xff\xd8\xff\xe0"
 HEADER = "photo_file,checkpoint,conditions,material:lumber,material:rebar,missing-step:anchor-bolts,defect:honeycomb"
 
 
@@ -20,7 +21,7 @@ HEADER = "photo_file,checkpoint,conditions,material:lumber,material:rebar,missin
 def photos(tmp_path):
     folder = tmp_path / "photos"
     folder.mkdir()
-    for name, body in (("a.jpg", b"photo-a"), ("b.jpg", b"photo-b"), ("same-as-a.jpg", b"photo-a")):
+    for name, body in (("a.jpg", JPEG + b"photo-a"), ("b.jpg", JPEG + b"photo-b"), ("same-as-a.jpg", JPEG + b"photo-a")):
         (folder / name).write_bytes(body)
     return folder
 
@@ -33,7 +34,7 @@ def test_a_filled_sheet_becomes_a_set_the_harness_accepts(photos):
     dataset, files, warnings = cs.build(sheet("a.jpg,Pre Pour,concrete;Daylight,x,,x,", "b.jpg,,,,x,,x", ",,,,,,"), photos)
     ev.checked_set(dataset)
     a, b = dataset["cases"]
-    assert a["photo_sha256"] == hashlib.sha256(b"photo-a").hexdigest() and b["photo_sha256"] == hashlib.sha256(b"photo-b").hexdigest()
+    assert a["photo_sha256"] == hashlib.sha256(JPEG + b"photo-a").hexdigest() and b["photo_sha256"] == hashlib.sha256(JPEG + b"photo-b").hexdigest()
     assert a["conditions"] == ["concrete", "daylight", "checkpoint-pre-pour"] and b["conditions"] == []
     assert a["truth"] == {"material": ["lumber"], "missing-step": ["anchor-bolts"], "defect": []}
     assert b["truth"] == {"material": ["rebar"], "missing-step": [], "defect": ["honeycomb"]}
@@ -91,3 +92,14 @@ def test_the_command_line_writes_the_set_and_the_file_map(photos, tmp_path, caps
     out.unlink()
     assert cs.main([str(sheet_path), "--photos", str(photos), "--out", str(out)]) == 2
     assert not out.exists() and "cannot use this sheet" in capsys.readouterr().err
+
+
+def test_only_jpeg_files_within_the_server_limit_are_accepted(photos, monkeypatch):
+    (photos / "heic.jpg").write_bytes(b"\x00\x00\x00\x18ftypheic" + b"x" * 50)  # HEIC bytes, even under a .jpg name
+    (photos / "shot.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 50)
+    for name in ("heic.jpg", "shot.png"):
+        with pytest.raises(cs.SheetError, match="is not a JPEG"):
+            cs.build(sheet(f"{name},,,x,,,"), photos)
+    monkeypatch.setattr(cs, "MAX_PHOTO_BYTES", 10)
+    with pytest.raises(cs.SheetError, match="limit is 15 MB"):
+        cs.build(sheet("a.jpg,,,x,,,"), photos)
