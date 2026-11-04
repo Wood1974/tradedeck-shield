@@ -15,6 +15,12 @@ Fails closed. A category is "validated" only if thresholds the OWNER supplied ar
 estimate) on at least the owner's minimum number of present labels. With no thresholds, or too few cases, it is "not-validated" and the
 reasons are listed. Every case must have at least one finding or abstention, so a model cannot look better by skipping hard photos.
 
+Results are per LABEL ("rebar"), not per category: a claim is about one thing, and pooling labels lets a strong one hide a weak one.
+Photos from one job are not independent (same site, same lighting, same photographer). If every case names its `group` (a job id),
+the interval treats the photos as only as many independent samples as there are groups, which is the cautious reading; without
+groups nothing can be validated. Cases may also carry `split` (`tune` or `test`): tune the prompt on `tune`, then score `test` once. A test
+set that has already scored a different model or prompt is not a clean test, and a label cannot be validated on it.
+
 What a result is: the numbers for this model, this prompt and this set of photos. It says nothing about other photos, other
 lighting, other trades or a changed model. The report names the conditions it was tested on and the number of photos.
 The run is content-addressed (`run_id` hashes the set, the model, the prompt, the predictions and the thresholds). It is not signed yet.
@@ -32,6 +38,7 @@ import time
 CATEGORIES = ("material", "missing-step", "defect")
 STATUSES = ("found", "abstain")
 EVAL_SET_VERSION = 1
+SPLITS = ("tune", "test")
 RUN_VERSION = 1
 Z95 = 1.959963984540054
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -54,7 +61,7 @@ def sha256_of(value) -> str:
     return hashlib.sha256(canonical(value)).hexdigest()
 
 
-def wilson_permille(k: int, n: int) -> tuple[int, int, int] | None:
+def wilson_permille(k: float, n: float) -> tuple[int, int, int] | None:
     """(point, lower, upper) as whole permille for k successes in n, 95% Wilson interval rounded outward. None when n is 0."""
     if n <= 0:
         return None
@@ -88,8 +95,8 @@ def checked_set(dataset) -> dict:
         raise Invalid("the set has no cases")
     ids, photos = set(), set()
     for case in cases:
-        if not isinstance(case, dict) or set(case) - {"case_id", "photo_sha256", "conditions", "truth"} or not {"case_id", "photo_sha256", "truth"} <= set(case):
-            raise Invalid("a case needs case_id, photo_sha256, truth (and optional conditions)")
+        if not isinstance(case, dict) or set(case) - {"case_id", "photo_sha256", "conditions", "truth", "group", "split"} or not {"case_id", "photo_sha256", "truth"} <= set(case):
+            raise Invalid("a case needs case_id, photo_sha256, truth (and optional conditions, group, split)")
         if not isinstance(case["case_id"], str) or not _ID.fullmatch(case["case_id"]) or case["case_id"] in ids:
             raise Invalid("case ids must be short and unique")
         if not isinstance(case["photo_sha256"], str) or not _HEX64.fullmatch(case["photo_sha256"]) or case["photo_sha256"] in photos:
@@ -103,10 +110,17 @@ def checked_set(dataset) -> dict:
             if not set(_labels(truth[cat], f"case {case['case_id']} truth.{cat}")) <= set(vocab[cat]):
                 raise Invalid(f"case {case['case_id']}: a {cat} label is not in the vocabulary")
         _labels(case.get("conditions", []), f"case {case['case_id']} conditions")
+        if "group" in case and (not isinstance(case["group"], str) or not _ID.fullmatch(case["group"])):
+            raise Invalid(f"case {case['case_id']}: group must be a short job id")
+        if "split" in case and case["split"] not in SPLITS:
+            raise Invalid(f"case {case['case_id']}: split must be tune or test")
+    for field in ("group", "split"):
+        if len({field in c for c in cases}) != 1:
+            raise Invalid(f"either every case has a {field} or none does")
     return dataset
 
 
-def checked_submission(submission, dataset) -> dict:
+def checked_submission(submission, dataset, required=None) -> dict:
     if not isinstance(submission, dict) or set(submission) != {"model_id", "prompt_sha256", "predictions"}:
         raise Invalid("a submission has model_id, prompt_sha256 and predictions")
     if not isinstance(submission["model_id"], str) or not submission["model_id"].strip() or len(submission["model_id"]) > 512:
@@ -115,6 +129,7 @@ def checked_submission(submission, dataset) -> dict:
         raise Invalid("prompt_sha256 must be 64 hex characters")
     vocab = dataset["vocabulary"]
     case_ids = {c["case_id"] for c in dataset["cases"]}
+    required = case_ids if required is None else required
     seen, covered = set(), set()
     for p in submission["predictions"] if isinstance(submission["predictions"], list) else [None]:
         if not isinstance(p, dict) or set(p) != {"case_id", "category", "label", "status", "confidence_permille"}:
@@ -129,8 +144,8 @@ def checked_submission(submission, dataset) -> dict:
             raise Invalid(f"two predictions for {key[0]}/{key[2]}")
         seen.add(key)
         covered.add(p["case_id"])
-    if covered != case_ids:
-        raise Invalid("cases with no finding or abstention: " + ", ".join(sorted(case_ids - covered)) + " (every photo must be answered)")
+    if not required <= covered:
+        raise Invalid("cases with no finding or abstention: " + ", ".join(sorted(required - covered)) + " (every photo must be answered)")
     return submission
 
 
@@ -146,93 +161,137 @@ def checked_thresholds(thresholds) -> dict | None:
     return thresholds
 
 
-def _rate(k: int, n: int) -> dict | None:
-    w = wilson_permille(k, n)
-    return None if w is None else {"permille": w[0], "lower_permille": w[1], "upper_permille": w[2], "of": n}
+def _rate(k: int, n: int, r: float = 1.0) -> dict | None:
+    """A rate with its 95% interval. `r` (clusters / photos, at most 1) shrinks the sample the interval is computed from."""
+    w = wilson_permille(k * r, n * r)
+    return None if w is None else {"permille": w[0], "lower_permille": w[1], "upper_permille": w[2], "of": n, "effective_of": round(n * r, 2)}
 
 
-def _category(cat: str, dataset: dict, by_case: dict, thresholds: dict | None) -> dict:
-    tp = fp = fn = tn = abstained = items = present = 0
+def _label(cat: str, label: str, cases: list, by_case: dict, r: float, t: dict | None) -> dict:
+    tp = fp = fn = abstained = present = 0
     wrong: list[dict] = []
-    for case in dataset["cases"]:
-        truth = set(case["truth"][cat])
-        for label in dataset["vocabulary"][cat]:
-            items += 1
-            pred = by_case.get(case["case_id"], {}).get((cat, label))
-            is_present = label in truth
-            present += is_present
-            if pred == "abstain":
-                abstained += 1
-            if is_present:
-                if pred == "found":
-                    tp += 1
-                else:
-                    fn += 1
-                    wrong.append({"case_id": case["case_id"], "label": label, "kind": "abstained-present" if pred == "abstain" else "missed"})
-            elif pred == "found":
-                fp += 1
-                wrong.append({"case_id": case["case_id"], "label": label, "kind": "false-positive"})
-            else:
-                tn += 1
-    precision, recall = _rate(tp, tp + fp), _rate(tp, present)
+    for case in cases:
+        is_present = label in case["truth"][cat]
+        pred = by_case.get(case["case_id"], {}).get((cat, label))
+        present += is_present
+        abstained += pred == "abstain"
+        if is_present and pred == "found":
+            tp += 1
+        elif is_present:
+            fn += 1
+            wrong.append({"case_id": case["case_id"], "kind": "abstained-present" if pred == "abstain" else "missed"})
+        elif pred == "found":
+            fp += 1
+            wrong.append({"case_id": case["case_id"], "kind": "false-positive"})
+    precision, recall = _rate(tp, tp + fp, r), _rate(tp, present, r)
     reasons: list[str] = []
-    t = (thresholds or {}).get(cat)
     if t is None:
         reasons.append("no thresholds were set by the owner for this category")
     else:
         if present < t["min_present"]:
-            reasons.append(f"only {present} present labels, the owner's minimum is {t['min_present']}")
+            reasons.append(f"only {present} photos show it, the owner's minimum is {t['min_present']}")
         if precision is None or precision["lower_permille"] < t["min_precision_permille"]:
             reasons.append(f"precision lower bound {None if precision is None else precision['lower_permille']} is under {t['min_precision_permille']} permille")
         if recall is None or recall["lower_permille"] < t["min_recall_permille"]:
             reasons.append(f"recall lower bound {None if recall is None else recall['lower_permille']} is under {t['min_recall_permille']} permille")
-    return {"items": items, "present": present, "true_positive": tp, "false_positive": fp, "missed": fn, "true_negative": tn,
-            "abstained": abstained, "precision": precision, "recall": recall, "abstain_rate": _rate(abstained, items),
-            "status": "validated" if not reasons else "not-validated", "reasons": reasons,
-            "wrong": sorted(wrong, key=lambda w: (w["case_id"], w["label"]))}
+    return {"photos": len(cases), "present": present, "true_positive": tp, "false_positive": fp, "missed": fn, "abstained": abstained,
+            "precision": precision, "recall": recall, "abstain_rate": _rate(abstained, len(cases), r),
+            "reasons": reasons, "wrong": sorted(wrong, key=lambda w: w["case_id"])}
 
 
-def evaluate(dataset, submission, thresholds=None, now=now_ms) -> dict:
-    """The measured results for one model, prompt and labelled set. Raises Invalid for anything unusable."""
+def evaluate(dataset, submission, thresholds=None, now=now_ms, split=None, prior_test_uses=None) -> dict:
+    """The measured results for one model, prompt and labelled set. Raises Invalid for anything unusable.
+
+    `split` picks the cases to score when the set has splits ("tune" or "test"). `prior_test_uses` is the set of (model_id, prompt_sha256)
+    pairs the ledger says have already scored this test set; None means reuse is not being tracked, which blocks validation."""
     dataset = checked_set(dataset)
-    submission = checked_submission(submission, dataset)
+    has_split = "split" in dataset["cases"][0]
+    if has_split and split not in SPLITS:
+        raise Invalid("this set has a tune/test split: say which one to score (tune or test)")
+    if not has_split and split is not None:
+        raise Invalid("this set has no split")
+    cases = [c for c in dataset["cases"] if not has_split or c["split"] == split]
+    if not cases:
+        raise Invalid(f"no cases in the {split} split")
+    submission = checked_submission(submission, dataset, {c["case_id"] for c in cases})
     thresholds = checked_thresholds(thresholds)
     by_case: dict[str, dict] = {}
     for p in submission["predictions"]:
         by_case.setdefault(p["case_id"], {})[(p["category"], p["label"])] = p["status"]
+    grouped = "group" in cases[0]
+    r = len({c["group"] for c in cases}) / len(cases) if grouped else 1.0
+    process: list[str] = []
+    if not grouped:
+        process.append("no job grouping: photos from one job are not independent, and without groups the margins are too narrow")
+    if not has_split:
+        process.append("no tune/test split: the prompt may have been tuned on these photos")
+    elif split == "tune":
+        process.append("scored on tuning photos: that is not evidence")
+    else:
+        uses = None if prior_test_uses is None else set(prior_test_uses) | {(submission["model_id"], submission["prompt_sha256"])}
+        if uses is None:
+            process.append("test-set reuse is not being tracked (no ledger)")
+        elif len(uses) > 1:
+            process.append(f"this test set has already scored {len(uses) - 1} other model or prompt: not a clean test")
     conditions: dict[str, int] = {}
-    for case in dataset["cases"]:
+    for case in cases:
         for c in case.get("conditions", []):
             conditions[c] = conditions.get(c, 0) + 1
     dataset_sha = sha256_of(dataset)
     predictions = sorted(submission["predictions"], key=lambda p: (p["case_id"], p["category"], p["label"]))
     run_id = sha256_of({"dataset_sha256": dataset_sha, "model_id": submission["model_id"], "prompt_sha256": submission["prompt_sha256"],
-                        "predictions": predictions, "thresholds": thresholds})
+                        "predictions": predictions, "thresholds": thresholds, "split": split})
+    categories = {}
+    for cat in CATEGORIES:
+        labels = {lab: _label(cat, lab, cases, by_case, r, (thresholds or {}).get(cat)) for lab in dataset["vocabulary"][cat]}
+        for entry in labels.values():
+            entry["status"] = "validated" if not entry["reasons"] and not process else "not-validated"
+        ok = [lab for lab, e in labels.items() if e["status"] == "validated"]
+        categories[cat] = {"labels": labels, "validated_labels": ok,
+                           "status": "validated" if len(ok) == len(labels) else ("partly-validated" if ok else "not-validated")}
     return {"run_version": RUN_VERSION, "run_id": run_id, "created_at_ms": now(), "model_id": submission["model_id"],
-            "prompt_sha256": submission["prompt_sha256"], "dataset_sha256": dataset_sha, "n_photos": len(dataset["cases"]),
-            "conditions_tested": dict(sorted(conditions.items())), "thresholds": thresholds,
-            "categories": {cat: _category(cat, dataset, by_case, thresholds) for cat in CATEGORIES},
-            "signed": False}
+            "prompt_sha256": submission["prompt_sha256"], "dataset_sha256": dataset_sha, "split": split, "n_photos": len(cases),
+            "n_groups": len({c["group"] for c in cases}) if grouped else None, "conditions_tested": dict(sorted(conditions.items())),
+            "thresholds": thresholds, "process_reasons": process, "categories": categories, "signed": False}
 
 
 def _pct(rate: dict | None) -> str:
-    return "n/a (no cases)" if rate is None else f"{rate['permille'] / 10:.1f}% (95% interval {rate['lower_permille'] / 10:.1f} to {rate['upper_permille'] / 10:.1f}, of {rate['of']})"
+    if rate is None:
+        return "n/a"
+    return f"{rate['permille'] / 10:.1f}% ({rate['lower_permille'] / 10:.1f} to {rate['upper_permille'] / 10:.1f}, of {rate['of']})"
 
 
 def report_lines(run: dict) -> list[str]:
     """Plain text for a person. States numbers and conditions; never says 'reliable'."""
-    lines = [f"run {run['run_id'][:16]}…  model {run['model_id']}  {run['n_photos']} photos",
+    lines = [f"run {run['run_id'][:16]}...  model {run['model_id']}  {run['n_photos']} photos" + (f" from {run['n_groups']} jobs" if run["n_groups"] else "")
+             + (f"  [{run['split']} split]" if run["split"] else ""),
              "tested on: " + (", ".join(f"{k} x{v}" for k, v in run["conditions_tested"].items()) or "(no condition tags)"),
-             "These numbers are for this model, this prompt and these photos only."]
-    for cat, r in run["categories"].items():
-        lines.append(f"{cat.upper()}: {r['status'].upper().replace('-', ' ')}")
-        lines.append(f"  precision {_pct(r['precision'])}")
-        lines.append(f"  recall    {_pct(r['recall'])}")
-        lines.append(f"  abstained {_pct(r['abstain_rate'])}")
-        lines.append(f"  {r['true_positive']} right, {r['false_positive']} wrong claims, {r['missed']} missed (of {r['present']} present)")
-        lines += [f"  not validated because: {x}" for x in r["reasons"]]
-        lines += [f"  {w['kind']}: {w['case_id']} / {w['label']}" for w in r["wrong"]]
+             "These numbers are for this model, this prompt and these photos only, and only for the labels listed below.",
+             "Anything the AI sees that is not on the list is not scored here."]
+    lines += [f"not evidence yet: {x}" for x in run["process_reasons"]]
+    for cat, c in run["categories"].items():
+        lines.append(f"{cat.upper()}: {c['status'].upper().replace('-', ' ')} ({len(c['validated_labels'])} of {len(c['labels'])} labels)")
+        for lab, e in c["labels"].items():
+            lines.append(f"  {lab}: {e['status'].upper().replace('-', ' ')}; shown in {e['present']} photos; precision {_pct(e['precision'])}; "
+                         f"recall {_pct(e['recall'])}; abstained {_pct(e['abstain_rate'])}")
+            lines += [f"      not validated because: {x}" for x in e["reasons"]]
+            lines += [f"      {w['kind']}: {w['case_id']}" for w in e["wrong"]]
     return lines
+
+
+def _ledger_read(path: str, dataset_sha: str) -> set[tuple[str, str]]:
+    """The (model, prompt) pairs already scored on this test set. A missing file means none. It guards against accident, not against deleting the file."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh if line.strip()]
+    except FileNotFoundError:
+        return set()
+    return {(r["model_id"], r["prompt_sha256"]) for r in rows if r.get("dataset_sha256") == dataset_sha}
+
+
+def _ledger_add(path: str, dataset_sha: str, model_id: str, prompt_sha: str) -> None:
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"dataset_sha256": dataset_sha, "model_id": model_id, "prompt_sha256": prompt_sha}, sort_keys=True) + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -240,6 +299,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("dataset", help="inspection_eval_set.v1 JSON")
     ap.add_argument("submission", help="model_id, prompt_sha256 and predictions JSON")
     ap.add_argument("--thresholds", help="JSON of the owner's per-category pass bar (omit: everything stays not-validated)")
+    ap.add_argument("--split", choices=SPLITS, help="which split to score, when the set has tune and test cases")
+    ap.add_argument("--ledger", help="file that remembers which models and prompts have scored a test set (needed to validate on it)")
     ap.add_argument("--out", help="write the run JSON here")
     args = ap.parse_args(argv)
     try:
@@ -250,7 +311,10 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 with open(path, encoding="utf-8") as fh:
                     loaded.append(json.load(fh))
-        run = evaluate(loaded[0], loaded[1], loaded[2])
+        prior = _ledger_read(args.ledger, sha256_of(loaded[0])) if args.ledger and args.split == "test" else None
+        run = evaluate(loaded[0], loaded[1], loaded[2], split=args.split, prior_test_uses=prior)
+        if prior is not None:
+            _ledger_add(args.ledger, run["dataset_sha256"], run["model_id"], run["prompt_sha256"])
     except (Invalid, OSError, ValueError) as exc:
         print(f"cannot evaluate: {exc}", file=sys.stderr)
         return 2
