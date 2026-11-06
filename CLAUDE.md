@@ -28,6 +28,7 @@ Standing instructions from the owner. They apply to every session in this repo, 
 - Photos are stored on the Shield server disk and are readable only by the account that took them. No administrator route reads them.
 - Honest labels: never say a photo is "attested" unless a server verified Apple's assertion. Say what was actually checked; a valid signature alone does not show the image matches.
 - Construction content uses Utah building codes only.
+- Shield stays standalone: nothing from the marketplace or any other build is merged into Shield (this server, `verifier/`, `eval/`, or the app in `shield-app/`). Other builds may copy Shield files out; nothing flows back. See `docs/features/using-shield-elsewhere.md`. (Owner, Nov 2026.)
 
 ## What's here
 
